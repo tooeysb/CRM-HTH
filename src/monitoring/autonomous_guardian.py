@@ -105,7 +105,12 @@ class ScanGuardian:
 
     def is_scan_stuck(self, status: dict) -> tuple[bool, str]:
         """
-        Determine if scan is stuck.
+        Determine if scan is stuck by checking job.updated_at timestamp.
+
+        Note: We only check job.updated_at, not Email.created_at, because:
+        - Duplicate emails don't get new created_at timestamps with on_conflict_do_nothing()
+        - This caused false positives where active jobs processing duplicates were killed
+        - job.updated_at correctly reflects activity even when processing duplicates
 
         Returns:
             (is_stuck: bool, reason: str)
@@ -121,17 +126,6 @@ class ScanGuardian:
             minutes_since_update = (now - job.updated_at).total_seconds() / 60
             if minutes_since_update > (self.stuck_threshold / 60):
                 return True, f"Job hasn't updated in {minutes_since_update:.1f} minutes"
-
-        # Check if emails haven't been processed in stuck_threshold seconds
-        if status["last_email_time"]:
-            last_email_time = status["last_email_time"]
-            if last_email_time.tzinfo is None:
-                from datetime import timezone
-                last_email_time = last_email_time.replace(tzinfo=timezone.utc)
-
-            minutes_since_email = (now - last_email_time).total_seconds() / 60
-            if minutes_since_email > (self.stuck_threshold / 60):
-                return True, f"No emails processed in {minutes_since_email:.1f} minutes"
 
         return False, "Job is progressing normally"
 
