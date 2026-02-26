@@ -252,9 +252,24 @@ class ThemeBatchProcessor:
         if not text_content:
             raise ValueError("No text content found in message")
 
+        # Strip markdown code blocks if present (```json ... ```)
+        text_content = text_content.strip()
+        if text_content.startswith("```json"):
+            # Remove opening ```json and closing ```
+            text_content = text_content[7:]  # Remove ```json
+            if text_content.endswith("```"):
+                text_content = text_content[:-3]  # Remove closing ```
+            text_content = text_content.strip()
+        elif text_content.startswith("```"):
+            # Handle plain ``` without json
+            text_content = text_content[3:]
+            if text_content.endswith("```"):
+                text_content = text_content[:-3]
+            text_content = text_content.strip()
+
         # Parse JSON response
         try:
-            themes = json.loads(text_content.strip())
+            themes = json.loads(text_content)
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse JSON response: {text_content}")
             raise ValueError(f"Invalid JSON response from Claude: {e}")

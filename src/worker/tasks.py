@@ -177,6 +177,7 @@ def scan_gmail_task(
         # ========================================
         # TODO: Add contacts scope and re-enable contacts sync
         logger.info(f"[{correlation_id}] Skipping contacts sync (no contacts scope)")
+        merged_contacts = []  # Empty list when skipping contacts
 
         # ========================================
         # PHASE 2: Sync Emails (0-40%)
