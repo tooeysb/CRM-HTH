@@ -421,72 +421,75 @@ def scan_gmail_task(
         # ========================================
         # PHASE 5: Generate Vault (70-100%)
         # ========================================
-        self.update_progress("vault", 70, message="Generating Obsidian vault")
-        job.phase = "vault"
-        job.progress_pct = 70
-        db.commit()
+        # Skip vault generation in production - vault is for local development only
+        # Heroku has read-only filesystem except /tmp, and vault isn't needed for database storage
+        if settings.is_development:
+            self.update_progress("vault", 70, message="Generating Obsidian vault")
+            job.phase = "vault"
+            job.progress_pct = 70
+            db.commit()
 
-        # Initialize vault
-        vault_manager.initialize_vault()
-        logger.info(f"[{correlation_id}] Vault initialized at {settings.obsidian_vault_path}")
+            # Initialize vault
+            vault_manager.initialize_vault()
+            logger.info(f"[{correlation_id}] Vault initialized at {settings.obsidian_vault_path}")
 
-        # Group emails by contact
-        emails_by_contact = defaultdict(list)
-        for email in all_emails:
-            emails_by_contact[email.sender_email].append(email)
+            # Group emails by contact
+            emails_by_contact = defaultdict(list)
+            for email in all_emails:
+                emails_by_contact[email.sender_email].append(email)
 
-        # Generate contact notes
-        self.update_progress("vault", 75, message="Generating contact notes")
-        for contact_idx, contact in enumerate(merged_contacts):
-            contact_emails = emails_by_contact.get(contact.email, [])
+            # Generate contact notes
+            self.update_progress("vault", 75, message="Generating contact notes")
+            for contact_idx, contact in enumerate(merged_contacts):
+                contact_emails = emails_by_contact.get(contact.email, [])
 
-            # Fetch tags for contact emails
-            email_ids = [e.id for e in contact_emails]
-            tags_query = db.query(EmailTag).filter(EmailTag.email_id.in_(email_ids)).all()
+                # Fetch tags for contact emails
+                email_ids = [e.id for e in contact_emails]
+                tags_query = db.query(EmailTag).filter(EmailTag.email_id.in_(email_ids)).all()
 
-            # Generate contact note
-            contact_note = note_generator.generate_contact_note(contact, contact_emails)
+                # Generate contact note
+                contact_note = note_generator.generate_contact_note(contact, contact_emails)
 
-            # Write to vault
-            contact_path = vault_manager.get_contact_path(contact.name or contact.email)
-            contact_path.write_text(contact_note)
+                # Write to vault
+                contact_path = vault_manager.get_contact_path(contact.name or contact.email)
+                contact_path.write_text(contact_note)
 
-            # Update progress
-            if contact_idx % 10 == 0:
-                progress = int(75 + (contact_idx / len(merged_contacts)) * 10)
-                self.update_progress(
-                    "vault", progress, message=f"Generated {contact_idx} contact notes"
-                )
-                job.progress_pct = progress
-                db.commit()
+                # Update progress
+                if contact_idx % 10 == 0:
+                    progress = int(75 + (contact_idx / len(merged_contacts)) * 10)
+                    self.update_progress(
+                        "vault", progress, message=f"Generated {contact_idx} contact notes"
+                    )
+                    job.progress_pct = progress
+                    db.commit()
 
-        logger.info(f"[{correlation_id}] Generated {len(merged_contacts)} contact notes")
+            logger.info(f"[{correlation_id}] Generated {len(merged_contacts)} contact notes")
 
-        # Generate email notes
-        self.update_progress("vault", 85, message="Generating email notes")
-        for email_idx, email in enumerate(all_emails):
-            # Fetch tags for this email
-            tags = db.query(EmailTag).filter(EmailTag.email_id == email.id).all()
-            tag_strings = [f"{t.tag_category}/{t.tag}" for t in tags]
+            # Generate email notes
+            self.update_progress("vault", 85, message="Generating email notes")
+            for email_idx, email in enumerate(all_emails):
+                # Fetch tags for this email
+                tags = db.query(EmailTag).filter(EmailTag.email_id == email.id).all()
+                tag_strings = [f"{t.tag_category}/{t.tag}" for t in tags]
 
-            # Generate email note
-            email_note = note_generator.generate_email_note(email, tag_strings)
+                # Generate email note
+                email_note = note_generator.generate_email_note(email, tag_strings)
 
-            # Write to vault
-            email_path = vault_manager.get_email_path(email.date, email.subject or "Untitled")
-            vault_manager.ensure_email_directory(email.date)
-            email_path.write_text(email_note)
+                # Write to vault
+                email_path = vault_manager.get_email_path(email.date, email.subject or "Untitled")
+                vault_manager.ensure_email_directory(email.date)
+                email_path.write_text(email_note)
 
-            # Update progress
-            if email_idx % 100 == 0:
-                progress = int(85 + (email_idx / len(all_emails)) * 15)
-                self.update_progress(
-                    "vault", progress, message=f"Generated {email_idx} email notes"
-                )
-                job.progress_pct = progress
-                db.commit()
+                # Update progress
+                if email_idx % 100 == 0:
+                    progress = int(85 + (email_idx / len(all_emails)) * 15)
+                    self.update_progress(
+                        "vault", progress, message=f"Generated {email_idx} email notes"
+                    )
+                    job.progress_pct = progress
+                    db.commit()
 
-        logger.info(f"[{correlation_id}] Generated {len(all_emails)} email notes")
+            logger.info(f"[{correlation_id}] Generated {len(all_emails)} email notes")
 
         # ========================================
         # COMPLETE
