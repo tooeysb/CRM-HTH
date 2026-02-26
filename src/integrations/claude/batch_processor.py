@@ -212,8 +212,9 @@ class ThemeBatchProcessor:
                 else:
                     # Handle error result
                     error_type = getattr(result.result, "type", "unknown")
-                    error_msg = getattr(result.result.error, "message", "No error message") if hasattr(result.result, "error") else "Unknown error"
-                    logger.error(f"Email {email_id} processing failed: {error_type} - {error_msg}")
+                    # Log full error object to understand structure
+                    logger.error(f"Email {email_id} processing failed with type: {error_type}")
+                    logger.error(f"Full error object: {result.result}")
                     results[email_id] = self._empty_themes()
 
             return results
