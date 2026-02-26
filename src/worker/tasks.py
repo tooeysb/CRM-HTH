@@ -375,6 +375,14 @@ def scan_gmail_task(
                     )
                     continue
 
+                # Verify email exists in database (might be duplicate that was skipped)
+                email_exists = db.query(Email.id).filter(Email.id == email.id).first()
+                if not email_exists:
+                    logger.debug(
+                        f"[{correlation_id}] Skipping tags for duplicate email {email.id}"
+                    )
+                    continue
+
                 # Get account label for this email
                 account = next(
                     (acc for acc in accounts if acc.id == email.account_id), None
