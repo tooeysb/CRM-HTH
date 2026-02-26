@@ -115,7 +115,7 @@ class ThemeBatchProcessor:
 
         # Submit batch via API
         try:
-            batch_response = self.client.messages.batches.create(requests=requests)
+            batch_response = self.client.beta.messages.batches.create(requests=requests)
             batch_id = batch_response.id
 
             logger.info(
@@ -166,7 +166,7 @@ class ThemeBatchProcessor:
         logger.info(f"Polling batch {batch_id} for results...")
 
         # Retrieve batch status
-        batch = self.client.messages.batches.retrieve(batch_id)
+        batch = self.client.beta.messages.batches.retrieve(batch_id)
 
         status = batch.processing_status
 
@@ -199,7 +199,7 @@ class ThemeBatchProcessor:
 
             # Retrieve all results
             results = {}
-            for result in self.client.messages.batches.results(batch_id):
+            for result in self.client.beta.messages.batches.results(batch_id):
                 email_id = result.custom_id
 
                 if result.result.type == "succeeded":
