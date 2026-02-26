@@ -365,7 +365,10 @@ def scan_gmail_task(
             batch_results = theme_processor.process_emails_sync(email_batch)
 
             # Generate tags from themes
-            for email, themes in zip(email_batch, batch_results):
+            for email in email_batch:
+                email_id = str(email.id)
+                themes = batch_results.get(email_id)
+
                 if not themes:
                     logger.warning(
                         f"[{correlation_id}] No themes detected for email {email.id}"
