@@ -1,11 +1,13 @@
 """
 Gmail API rate limiter using token bucket algorithm.
 Supports distributed rate limiting via Redis for horizontal scaling.
+
+Uses an atomic Lua script to eliminate TOCTOU race conditions when
+multiple workers compete for tokens concurrently.
 """
 
 import ssl
 import time
-from datetime import datetime
 from typing import Any, Callable
 
 import redis
@@ -28,6 +30,36 @@ class GmailRateLimitExceeded(Exception):
     pass
 
 
+# Lua script for atomic token bucket acquire.
+# Refills tokens based on elapsed time, then attempts to consume.
+# Returns 1 if tokens acquired, 0 if insufficient tokens.
+_ACQUIRE_SCRIPT = """
+local bucket_key = KEYS[1]
+local timestamp_key = KEYS[2]
+local max_tokens = tonumber(ARGV[1])
+local refill_rate = tonumber(ARGV[2])
+local tokens_requested = tonumber(ARGV[3])
+local now = tonumber(ARGV[4])
+
+local current_tokens = tonumber(redis.call('GET', bucket_key) or max_tokens)
+local last_refill = tonumber(redis.call('GET', timestamp_key) or now)
+
+local elapsed = now - last_refill
+local new_tokens = math.min(current_tokens + elapsed * refill_rate, max_tokens)
+
+if new_tokens >= tokens_requested then
+    new_tokens = new_tokens - tokens_requested
+    redis.call('SET', bucket_key, tostring(new_tokens))
+    redis.call('SET', timestamp_key, tostring(now))
+    return 1
+else
+    redis.call('SET', bucket_key, tostring(new_tokens))
+    redis.call('SET', timestamp_key, tostring(now))
+    return 0
+end
+"""
+
+
 class GmailRateLimiter:
     """
     Token bucket rate limiter for Gmail API with Redis backing.
@@ -38,6 +70,7 @@ class GmailRateLimiter:
     - If no tokens available, request is rate limited
 
     Redis is used for distributed rate limiting across multiple workers/instances.
+    All token operations are atomic via a Lua script to prevent race conditions.
     """
 
     def __init__(
@@ -74,53 +107,16 @@ class GmailRateLimiter:
             **connection_params,
         )
 
-        # Redis key for storing token bucket state
+        # Redis keys for storing token bucket state
         self.bucket_key = "gmail:rate_limiter:tokens"
         self.timestamp_key = "gmail:rate_limiter:last_refill"
 
-    def _get_current_tokens(self) -> tuple[float, float]:
-        """
-        Get current token count and last refill timestamp from Redis.
-
-        Returns:
-            Tuple of (current_tokens, last_refill_timestamp)
-        """
-        pipe = self.redis_client.pipeline()
-        pipe.get(self.bucket_key)
-        pipe.get(self.timestamp_key)
-        results = pipe.execute()
-
-        current_tokens = float(results[0]) if results[0] else self.max_tokens
-        last_refill = float(results[1]) if results[1] else time.time()
-
-        return current_tokens, last_refill
-
-    def _refill_tokens(self) -> float:
-        """
-        Refill tokens based on elapsed time since last refill.
-
-        Returns:
-            Current token count after refill
-        """
-        current_tokens, last_refill = self._get_current_tokens()
-        now = time.time()
-        elapsed = now - last_refill
-
-        # Calculate tokens to add based on elapsed time and refill rate
-        tokens_to_add = elapsed * self.refill_rate
-        new_tokens = min(current_tokens + tokens_to_add, self.max_tokens)
-
-        # Update Redis with new token count and timestamp
-        pipe = self.redis_client.pipeline()
-        pipe.set(self.bucket_key, str(new_tokens))
-        pipe.set(self.timestamp_key, str(now))
-        pipe.execute()
-
-        return new_tokens
+        # Register Lua script for atomic acquire
+        self._acquire_script = self.redis_client.register_script(_ACQUIRE_SCRIPT)
 
     def acquire(self, tokens: int = 1) -> bool:
         """
-        Attempt to acquire tokens from the bucket.
+        Attempt to acquire tokens from the bucket atomically.
 
         Args:
             tokens: Number of tokens to acquire (default: 1)
@@ -128,17 +124,11 @@ class GmailRateLimiter:
         Returns:
             True if tokens were acquired, False if rate limit exceeded
         """
-        # Refill tokens first
-        current_tokens = self._refill_tokens()
-
-        # Check if we have enough tokens
-        if current_tokens >= tokens:
-            # Consume tokens
-            new_tokens = current_tokens - tokens
-            self.redis_client.set(self.bucket_key, str(new_tokens))
-            return True
-
-        return False
+        result = self._acquire_script(
+            keys=[self.bucket_key, self.timestamp_key],
+            args=[self.max_tokens, self.refill_rate, tokens, time.time()],
+        )
+        return bool(result)
 
     def wait_for_token(self, tokens: int = 1, timeout: float = 60.0) -> None:
         """
@@ -154,17 +144,10 @@ class GmailRateLimiter:
         start_time = time.time()
 
         while time.time() - start_time < timeout:
-            current_tokens = self.get_token_count()
-            logger.debug(
-                f"Waiting for {tokens} tokens, currently have {current_tokens:.1f} "
-                f"(elapsed: {time.time() - start_time:.1f}s)"
-            )
-
             if self.acquire(tokens=tokens):
                 return
 
-            # Calculate sleep time based on refill rate
-            # Sleep for time it takes to refill one token
+            # Sleep for time proportional to refill rate
             sleep_time = min(1.0 / self.refill_rate, 0.1)
             time.sleep(sleep_time)
 
@@ -173,8 +156,13 @@ class GmailRateLimiter:
         )
 
     def get_token_count(self) -> float:
-        """Get current token count without refilling."""
-        current_tokens, _ = self._get_current_tokens()
+        """Get current token count without modifying state."""
+        pipe = self.redis_client.pipeline()
+        pipe.get(self.bucket_key)
+        pipe.get(self.timestamp_key)
+        results = pipe.execute()
+
+        current_tokens = float(results[0]) if results[0] else self.max_tokens
         return current_tokens
 
     def reset(self) -> None:

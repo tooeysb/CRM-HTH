@@ -56,9 +56,10 @@ class Settings(BaseSettings):
     )
 
     # Rate Limiting
-    # Gmail API limits: 250 QPM (~4 QPS average), ~10-20 concurrent requests max
-    gmail_rate_limit_qps: int = Field(default=3, alias="GMAIL_RATE_LIMIT_QPS")  # Very conservative: 3 QPS = 180 QPM (72% of limit)
-    gmail_rate_limit_burst: int = Field(default=100, alias="GMAIL_RATE_LIMIT_BURST")  # Burst capacity: 100 tokens for initial processing, refills at 3/sec (rebuilds in ~33s)
+    # Gmail API quota: 15,000 QPM (250 QPS). Each messages.get = 5 quota units,
+    # so max = 50 messages/sec. 40 QPS = 80% safety margin.
+    gmail_rate_limit_qps: int = Field(default=40, alias="GMAIL_RATE_LIMIT_QPS")
+    gmail_rate_limit_burst: int = Field(default=100, alias="GMAIL_RATE_LIMIT_BURST")
     gmail_batch_size: int = Field(default=500, alias="GMAIL_BATCH_SIZE")  # Message ID fetch size (single API call)
 
     # Claude Batch Processing

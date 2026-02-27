@@ -33,7 +33,7 @@ SessionLocal = sessionmaker(bind=engine)
 
 logger = get_logger(__name__)
 
-BATCH_SIZE = 100  # IDs to claim and fetch per worker task
+BATCH_SIZE = 200  # IDs to claim and fetch per worker task
 QUEUE_BATCH_SIZE = 10000  # Queue IDs and spawn workers every N IDs collected
 
 
@@ -317,7 +317,19 @@ def fetch_message_batch(account_id: str):
 
             logger.info(f"[{task_id}] Removed {len(claim_result)} IDs from queue")
 
-            # Check if more work remains
+        except Exception as e:
+            logger.error(f"[{task_id}] Error fetching messages: {e}")
+            # Unclaim on error so another worker can retry
+            db.query(EmailQueue).filter(EmailQueue.id.in_([r.id for r in claim_result])).update(
+                {"claimed_by": None, "claimed_at": None}, synchronize_session=False
+            )
+            db.commit()
+            raise
+
+        # Self-healing chain: always check for remaining work and spawn next task,
+        # even if the main processing above partially failed. This runs in a
+        # separate try block so a crash above doesn't permanently break the chain.
+        try:
             remaining = (
                 db.query(func.count(EmailQueue.id))
                 .filter(
@@ -330,14 +342,7 @@ def fetch_message_batch(account_id: str):
             if remaining > 0:
                 logger.info(f"[{task_id}] {remaining} IDs remaining, spawning another task")
                 fetch_message_batch.delay(account_id)
-
         except Exception as e:
-            logger.error(f"[{task_id}] Error fetching messages: {e}")
-            # Unclaim on error so another worker can retry
-            db.query(EmailQueue).filter(EmailQueue.id.in_([r.id for r in claim_result])).update(
-                {"claimed_by": None, "claimed_at": None}, synchronize_session=False
-            )
-            db.commit()
-            raise
+            logger.error(f"[{task_id}] Error spawning next task: {e}")
     finally:
         db.close()

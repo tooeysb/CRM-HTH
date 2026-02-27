@@ -26,7 +26,7 @@ from sqlalchemy.orm import sessionmaker
 
 from src.core.config import settings
 from src.core.logging import get_logger
-from src.models import Email, GmailAccount, GuardianEvent
+from src.models import Email, EmailQueue, GmailAccount, GuardianEvent
 
 logger = get_logger(__name__)
 
@@ -37,6 +37,7 @@ DASHBOARD_URL = os.getenv("DASHBOARD_URL", "http://localhost:8000/dashboard/stat
 STALL_THRESHOLD_MINUTES = 5  # Consider stalled if 0 emails/min for this long
 CHECK_INTERVAL_SECONDS = 60  # Check every 60 seconds
 MIN_EXPECTED_RATE = 10.0  # Minimum emails/min to consider "healthy"
+MAX_PHASE2_WORKERS = int(os.getenv("MAX_PHASE2_WORKERS", "4"))
 
 # Celery app for triggering tasks
 celery_app = Celery("monitor")
@@ -169,8 +170,92 @@ def log_event(event_type: str, description: str, account_email: str = None, meta
         db.close()
 
 
+def check_queue_and_spawn_workers():
+    """
+    Check EmailQueue for unclaimed items and spawn Phase 2 workers directly.
+
+    This is the primary self-healing mechanism: every 60 seconds, the monitor
+    checks if there are queued emails waiting to be processed and ensures
+    enough workers are running to handle them.
+    """
+    db = SessionLocal()
+    try:
+        # Get unclaimed counts per account
+        queue_stats = (
+            db.query(
+                EmailQueue.account_id,
+                func.count(EmailQueue.id).label("unclaimed"),
+            )
+            .filter(EmailQueue.claimed_by == None)
+            .group_by(EmailQueue.account_id)
+            .all()
+        )
+
+        if not queue_stats:
+            return
+
+        for account_id, unclaimed_count in queue_stats:
+            # Estimate active workers: items claimed in the last 5 minutes
+            active_cutoff = datetime.utcnow() - timedelta(minutes=5)
+            active_workers = (
+                db.query(func.count(func.distinct(EmailQueue.claimed_by)))
+                .filter(
+                    EmailQueue.account_id == account_id,
+                    EmailQueue.claimed_by != None,
+                    EmailQueue.claimed_at >= active_cutoff,
+                )
+                .scalar()
+            ) or 0
+
+            # Look up account email for logging
+            account = db.query(GmailAccount).filter(GmailAccount.id == account_id).first()
+            account_label = account.account_email if account else str(account_id)
+
+            workers_needed = MAX_PHASE2_WORKERS - active_workers
+            if unclaimed_count > 0 and workers_needed > 0:
+                # Don't spawn more workers than needed for the remaining items
+                batch_size = 200  # Matches BATCH_SIZE in id_first_tasks
+                max_useful = (unclaimed_count + batch_size - 1) // batch_size
+                workers_to_spawn = min(workers_needed, max_useful)
+
+                logger.info(
+                    f"[{account_label}] Queue: {unclaimed_count} unclaimed, "
+                    f"{active_workers} active workers, spawning {workers_to_spawn} workers"
+                )
+
+                from src.worker.id_first_tasks import fetch_message_batch
+
+                for _ in range(workers_to_spawn):
+                    fetch_message_batch.delay(str(account_id))
+
+                log_event(
+                    "queue_workers_spawned",
+                    f"Spawned {workers_to_spawn} Phase 2 workers for {account_label}",
+                    account_email=account_label,
+                    metadata={
+                        "unclaimed": unclaimed_count,
+                        "active_workers": active_workers,
+                        "workers_spawned": workers_to_spawn,
+                    },
+                )
+            elif unclaimed_count > 0:
+                logger.info(
+                    f"[{account_label}] Queue: {unclaimed_count} unclaimed, "
+                    f"{active_workers} active workers (at capacity)"
+                )
+
+    except Exception as e:
+        logger.error(f"Error checking queue: {e}", exc_info=True)
+    finally:
+        db.close()
+
+
 def restart_account_sync(account_email: str, reason: str):
-    """Restart email sync for a specific account via Celery."""
+    """Restart email sync for a specific account via Celery.
+
+    Queue-aware: if EmailQueue already has unclaimed items for this account,
+    spawns Phase 2 workers directly instead of re-fetching IDs from Gmail.
+    """
     logger.info(f"[{account_email}] Triggering restart: {reason}")
 
     # Get user_id for this account
@@ -180,10 +265,42 @@ def restart_account_sync(account_email: str, reason: str):
         return False
 
     try:
-        # Import the NEW ID-first task (much faster than pagination)
+        # Check if there are already unclaimed items in the queue for this account
+        db = SessionLocal()
+        try:
+            account = (
+                db.query(GmailAccount)
+                .filter(GmailAccount.account_email == account_email)
+                .first()
+            )
+            if account:
+                unclaimed = (
+                    db.query(func.count(EmailQueue.id))
+                    .filter(
+                        EmailQueue.account_id == account.id,
+                        EmailQueue.claimed_by == None,
+                    )
+                    .scalar()
+                ) or 0
+
+                if unclaimed > 0:
+                    # Skip Phase 1 - spawn Phase 2 workers directly
+                    logger.info(
+                        f"[{account_email}] {unclaimed} unclaimed items in queue, "
+                        f"spawning Phase 2 workers directly (skipping ID re-fetch)"
+                    )
+                    from src.worker.id_first_tasks import fetch_message_batch
+
+                    workers = min(MAX_PHASE2_WORKERS, (unclaimed + 199) // 200)
+                    for _ in range(workers):
+                        fetch_message_batch.delay(str(account.id))
+                    return True
+        finally:
+            db.close()
+
+        # No queued items - fall through to Phase 1 (re-fetch IDs from Gmail)
         from src.worker.id_first_tasks import fetch_all_message_ids
 
-        # Trigger new ID-first scan task
         task = fetch_all_message_ids.delay(user_id=user_id)
         logger.info(f"[{account_email}] Started new ID-first scan task: {task.id}")
         return True
@@ -218,6 +335,9 @@ def monitor_loop():
         try:
             iteration += 1
             logger.info(f"\n[Check #{iteration}] {datetime.utcnow().isoformat()}")
+
+            # Check queue and spawn workers if needed (primary self-healing)
+            check_queue_and_spawn_workers()
 
             # Fetch current stats
             stats = get_account_stats()
