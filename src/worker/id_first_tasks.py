@@ -11,6 +11,7 @@ Benefits over pagination approach:
 - Easy resume on failure (just fetch unclaimed IDs)
 - No wasted time on empty pagination
 """
+import json
 import time
 import uuid
 from datetime import datetime, timedelta
@@ -73,7 +74,7 @@ def fetch_all_message_ids(user_id: str, account_label: str = None):
             )
 
             # Create Gmail client
-            creds = account.get_credentials_dict()
+            creds = json.loads(account.credentials)
             gmail_client = GmailClient(creds)
 
             # Fetch ALL message IDs (fast!)
@@ -237,7 +238,7 @@ def fetch_message_batch(account_id: str):
         logger.info(f"[{task_id}] Claimed {len(claimed_ids)} IDs")
 
         # Fetch full messages
-        creds = account.get_credentials_dict()
+        creds = json.loads(account.credentials)
         gmail_client = GmailClient(creds)
 
         try:
