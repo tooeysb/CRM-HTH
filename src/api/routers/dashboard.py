@@ -2,7 +2,7 @@
 Dashboard API routes for monitoring email processing stats.
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import HTMLResponse
@@ -12,11 +12,33 @@ from sqlalchemy.orm import Session
 
 from src.core.database import get_sync_db
 from src.core.logging import get_logger
-from src.models import Email, SyncJob
+from src.models import Email, GmailAccount, SyncJob
 
 logger = get_logger(__name__)
 
 router = APIRouter()
+
+# Gmail inbox totals (updated 2026-02-27)
+# These are queried from Gmail API offline to avoid rate limits
+GMAIL_TOTALS = {
+    "tooey@procore.com": 1048991,
+    "2e@procore.com": 87086,
+    "tooey@hth-corp.com": 26266,
+}
+
+
+class AccountStats(BaseModel):
+    """Per-account email statistics."""
+
+    account_label: str
+    account_email: str
+    gmail_total: int | None
+    db_count: int
+    progress_pct: float
+    oldest_email: str | None
+    newest_email: str | None
+    emails_per_minute: float | None
+    estimated_completion: str | None
 
 
 class EmailStatsResponse(BaseModel):
@@ -28,6 +50,7 @@ class EmailStatsResponse(BaseModel):
     active_scans: int
     current_job_id: str | None
     current_job_progress: int | None
+    accounts: list[AccountStats]
 
 
 @router.get("/stats", response_model=EmailStatsResponse)
@@ -36,7 +59,7 @@ async def get_email_stats(db: Session = Depends(get_sync_db)) -> EmailStatsRespo
     Get current email processing statistics.
 
     Returns:
-        Email count, time since last email, and active scan info
+        Email count, time since last email, active scan info, and per-account stats
     """
     # Get total email count
     total_emails = db.query(func.count(Email.id)).scalar() or 0
@@ -63,6 +86,73 @@ async def get_email_stats(db: Session = Depends(get_sync_db)) -> EmailStatsRespo
     current_job_id = str(active_job.id) if active_job else None
     current_job_progress = active_job.progress_pct if active_job else None
 
+    # Get per-account stats
+    accounts_list = []
+    gmail_accounts = db.query(GmailAccount).filter(GmailAccount.is_active == True).all()
+
+    for account in gmail_accounts:
+        # Get DB count for this account
+        db_count = (
+            db.query(func.count(Email.id)).filter(Email.account_id == account.id).scalar() or 0
+        )
+
+        # Get date range
+        oldest = (
+            db.query(func.min(Email.date)).filter(Email.account_id == account.id).scalar()
+        )
+        newest = (
+            db.query(func.max(Email.date)).filter(Email.account_id == account.id).scalar()
+        )
+
+        # Get Gmail total from config (avoids API rate limits)
+        gmail_total = GMAIL_TOTALS.get(account.account_email, 0)
+
+        # Calculate progress
+        progress_pct = 0.0
+        if gmail_total is not None and gmail_total > 0:
+            progress_pct = (db_count / gmail_total) * 100
+
+        # Calculate emails per minute (last 15 minutes)
+        fifteen_min_ago = datetime.utcnow() - timedelta(minutes=15)
+        recent_count = (
+            db.query(func.count(Email.id))
+            .filter(Email.account_id == account.id, Email.created_at >= fifteen_min_ago)
+            .scalar()
+            or 0
+        )
+        emails_per_minute = round(recent_count / 15.0, 1) if recent_count > 0 else 0.0
+
+        # Calculate estimated completion time
+        estimated_completion = None
+        if emails_per_minute > 0 and gmail_total:
+            remaining = gmail_total - db_count
+            if remaining > 0:
+                minutes_remaining = remaining / emails_per_minute
+                hours_remaining = minutes_remaining / 60
+
+                if hours_remaining < 1:
+                    estimated_completion = f"{int(minutes_remaining)}m"
+                elif hours_remaining < 24:
+                    estimated_completion = f"{int(hours_remaining)}h {int(minutes_remaining % 60)}m"
+                else:
+                    days = int(hours_remaining / 24)
+                    hours = int(hours_remaining % 24)
+                    estimated_completion = f"{days}d {hours}h"
+
+        accounts_list.append(
+            AccountStats(
+                account_label=account.account_label,
+                account_email=account.account_email,
+                gmail_total=gmail_total,
+                db_count=db_count,
+                progress_pct=round(progress_pct, 1),
+                oldest_email=oldest.isoformat() if oldest else None,
+                newest_email=newest.isoformat() if newest else None,
+                emails_per_minute=emails_per_minute,
+                estimated_completion=estimated_completion,
+            )
+        )
+
     return EmailStatsResponse(
         total_emails=total_emails,
         minutes_since_last_email=minutes_since_last,
@@ -70,6 +160,7 @@ async def get_email_stats(db: Session = Depends(get_sync_db)) -> EmailStatsRespo
         active_scans=active_scans,
         current_job_id=current_job_id,
         current_job_progress=current_job_progress,
+        accounts=accounts_list,
     )
 
 
@@ -79,7 +170,7 @@ async def get_widget() -> str:
     Get embeddable HTML widget for dashboard.
 
     Returns:
-        Self-contained HTML widget with auto-refresh
+        Self-contained HTML widget with auto-refresh and per-account stats
     """
     return """
 <!DOCTYPE html>
@@ -100,7 +191,7 @@ async def get_widget() -> str:
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             display: flex;
             justify-content: center;
-            align-items: center;
+            align-items: flex-start;
             min-height: 100vh;
             padding: 20px;
         }
@@ -108,9 +199,9 @@ async def get_widget() -> str:
         .widget {
             background: white;
             border-radius: 20px;
-            padding: 40px;
+            padding: 30px;
             box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-            max-width: 500px;
+            max-width: 700px;
             width: 100%;
         }
 
@@ -118,44 +209,96 @@ async def get_widget() -> str:
             font-size: 24px;
             font-weight: 700;
             color: #2d3748;
-            margin-bottom: 30px;
+            margin-bottom: 20px;
             text-align: center;
         }
 
-        .stat {
-            margin-bottom: 25px;
+        .account-card {
+            margin-bottom: 20px;
             padding: 20px;
             background: linear-gradient(135deg, #f6f8fb 0%, #eef1f5 100%);
             border-radius: 12px;
             border-left: 4px solid #667eea;
         }
 
-        .stat-label {
-            font-size: 13px;
-            font-weight: 600;
+        .account-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .account-label {
+            font-size: 16px;
+            font-weight: 700;
+            color: #2d3748;
+        }
+
+        .account-email {
+            font-size: 12px;
             color: #718096;
+        }
+
+        .progress-bar-container {
+            width: 100%;
+            height: 8px;
+            background: #e2e8f0;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-bottom: 10px;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            transition: width 0.3s ease;
+        }
+
+        .account-stats {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 15px;
+            font-size: 13px;
+        }
+
+        .stat-item {
+            text-align: center;
+        }
+
+        .stat-item-label {
+            color: #718096;
+            font-size: 11px;
             text-transform: uppercase;
             letter-spacing: 0.5px;
+            margin-bottom: 4px;
+        }
+
+        .stat-item-value {
+            color: #2d3748;
+            font-size: 18px;
+            font-weight: 700;
+        }
+
+        .total-card {
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 12px;
+            color: white;
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        .total-label {
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            opacity: 0.9;
             margin-bottom: 8px;
         }
 
-        .stat-value {
-            font-size: 42px;
+        .total-value {
+            font-size: 36px;
             font-weight: 800;
-            color: #2d3748;
-            line-height: 1;
-        }
-
-        .stat-value.good {
-            color: #48bb78;
-        }
-
-        .stat-value.warning {
-            color: #ed8936;
-        }
-
-        .stat-value.danger {
-            color: #f56565;
         }
 
         .status {
@@ -164,7 +307,6 @@ async def get_widget() -> str:
             padding: 15px 20px;
             background: #f7fafc;
             border-radius: 10px;
-            margin-top: 20px;
         }
 
         .status-dot {
@@ -198,7 +340,7 @@ async def get_widget() -> str:
             text-align: center;
             font-size: 12px;
             color: #a0aec0;
-            margin-top: 20px;
+            margin-top: 15px;
         }
 
         .error {
@@ -210,18 +352,15 @@ async def get_widget() -> str:
 </head>
 <body>
     <div class="widget">
-        <div class="title">📧 Email Processing</div>
+        <div class="title">📧 Email Processing Dashboard</div>
 
         <div id="content">
-            <div class="stat">
-                <div class="stat-label">Total Emails Processed</div>
-                <div class="stat-value" id="total">...</div>
+            <div class="total-card">
+                <div class="total-label">Total Emails Processed</div>
+                <div class="total-value" id="total">...</div>
             </div>
 
-            <div class="stat">
-                <div class="stat-label">Minutes Since Last Email</div>
-                <div class="stat-value" id="minutes">...</div>
-            </div>
+            <div id="accounts-container"></div>
 
             <div class="status">
                 <div class="status-dot" id="status-dot"></div>
@@ -238,14 +377,63 @@ async def get_widget() -> str:
         const API_URL = window.location.origin + '/dashboard/stats';
 
         function formatNumber(num) {
-            return num.toLocaleString();
+            return num ? num.toLocaleString() : '0';
         }
 
-        function getColorClass(minutes) {
-            if (minutes === null) return '';
-            if (minutes < 5) return 'good';
-            if (minutes < 15) return 'warning';
-            return 'danger';
+        function renderAccounts(accounts) {
+            const container = document.getElementById('accounts-container');
+            container.innerHTML = '';
+
+            accounts.forEach(account => {
+                const card = document.createElement('div');
+                card.className = 'account-card';
+
+                const gmailTotal = account.gmail_total || 0;
+                const dbCount = account.db_count || 0;
+                const progressPct = account.progress_pct || 0;
+                const remaining = gmailTotal - dbCount;
+                const emailsPerMin = account.emails_per_minute || 0;
+                const estimatedCompletion = account.estimated_completion || 'N/A';
+
+                card.innerHTML = `
+                    <div class="account-header">
+                        <div>
+                            <div class="account-label">${account.account_label}</div>
+                            <div class="account-email">${account.account_email}</div>
+                        </div>
+                        <div style="font-size: 18px; font-weight: 700; color: #667eea;">
+                            ${progressPct.toFixed(1)}%
+                        </div>
+                    </div>
+                    <div class="progress-bar-container">
+                        <div class="progress-bar" style="width: ${progressPct}%"></div>
+                    </div>
+                    <div class="account-stats">
+                        <div class="stat-item">
+                            <div class="stat-item-label">Gmail Total</div>
+                            <div class="stat-item-value">${formatNumber(gmailTotal)}</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-item-label">Processed</div>
+                            <div class="stat-item-value">${formatNumber(dbCount)}</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-item-label">Remaining</div>
+                            <div class="stat-item-value">${formatNumber(remaining)}</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-item-label">Emails/Min</div>
+                            <div class="stat-item-value">${emailsPerMin.toFixed(1)}</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-item-label">ETA</div>
+                            <div class="stat-item-value">${estimatedCompletion}</div>
+                        </div>
+                    </div>
+                `;
+
+                container.appendChild(card);
+            });
         }
 
         async function updateStats() {
@@ -258,14 +446,9 @@ async def get_widget() -> str:
                 // Update total emails
                 document.getElementById('total').textContent = formatNumber(data.total_emails);
 
-                // Update minutes since last email
-                const minutesEl = document.getElementById('minutes');
-                if (data.minutes_since_last_email !== null) {
-                    minutesEl.textContent = data.minutes_since_last_email;
-                    minutesEl.className = 'stat-value ' + getColorClass(data.minutes_since_last_email);
-                } else {
-                    minutesEl.textContent = '—';
-                    minutesEl.className = 'stat-value';
+                // Render account cards
+                if (data.accounts && data.accounts.length > 0) {
+                    renderAccounts(data.accounts);
                 }
 
                 // Update status
