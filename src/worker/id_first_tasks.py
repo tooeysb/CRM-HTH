@@ -34,6 +34,74 @@ SessionLocal = sessionmaker(bind=engine)
 logger = get_logger(__name__)
 
 BATCH_SIZE = 100  # IDs to claim and fetch per worker task
+QUEUE_BATCH_SIZE = 10000  # Queue IDs and spawn workers every N IDs collected
+
+
+def _process_id_batch(db, account, batch_ids, task_id):
+    """
+    Helper function to process a batch of IDs:
+    1. Check which already exist in Email table
+    2. Queue new IDs into EmailQueue
+    3. Spawn Phase 2 workers to process them
+
+    This allows Phase 1 and Phase 2 to run in parallel.
+    """
+    if not batch_ids:
+        return
+
+    # Check which IDs already exist in Email table
+    existing_ids = set()
+    existing = (
+        db.query(Email.gmail_message_id)
+        .filter(
+            Email.account_id == account.id,
+            Email.gmail_message_id.in_(batch_ids),
+        )
+        .all()
+    )
+    existing_ids = {row[0] for row in existing}
+
+    new_ids = [msg_id for msg_id in batch_ids if msg_id not in existing_ids]
+
+    logger.info(
+        f"[{task_id}] [{account.account_email}] "
+        f"Batch: {len(existing_ids)} already fetched, {len(new_ids)} new IDs to queue"
+    )
+
+    # Insert new IDs into EmailQueue
+    if new_ids:
+        queue_records = [
+            {
+                "id": uuid.uuid4(),
+                "account_id": account.id,
+                "gmail_message_id": msg_id,
+                "created_at": datetime.utcnow(),
+            }
+            for msg_id in new_ids
+        ]
+
+        # Batch insert in chunks of 1000
+        for i in range(0, len(queue_records), 1000):
+            chunk = queue_records[i : i + 1000]
+            stmt = insert(EmailQueue).on_conflict_do_nothing(
+                index_elements=["account_id", "gmail_message_id"]
+            )
+            db.execute(stmt, chunk)
+            db.commit()
+
+        logger.info(
+            f"[{task_id}] [{account.account_email}] Queued {len(new_ids)} message IDs"
+        )
+
+        # Spawn Phase 2 workers immediately (up to 10 concurrent workers)
+        num_workers = min(10, (len(new_ids) + BATCH_SIZE - 1) // BATCH_SIZE)
+        if num_workers > 0:
+            logger.info(
+                f"[{task_id}] [{account.account_email}] Spawning {num_workers} Phase 2 workers"
+            )
+            tasks = [fetch_message_batch.s(str(account.id)) for _ in range(num_workers)]
+            job = group(tasks)
+            job.apply_async()
 
 
 @celery_app.task(name="fetch_all_message_ids")
@@ -77,10 +145,12 @@ def fetch_all_message_ids(user_id: str, account_label: str = None):
             creds = json.loads(account.credentials)
             gmail_client = GmailClient(creds)
 
-            # Fetch ALL message IDs (fast!)
-            all_ids = []
+            # Fetch ALL message IDs with incremental processing
+            # Process batches as we go to allow Phase 1 and Phase 2 to run in parallel
+            current_batch = []
             next_page_token = None
             page_count = 0
+            total_ids_collected = 0
 
             while True:
                 try:
@@ -92,13 +162,23 @@ def fetch_all_message_ids(user_id: str, account_label: str = None):
                     )
 
                     if message_ids:
-                        all_ids.extend(message_ids)
+                        current_batch.extend(message_ids)
+                        total_ids_collected += len(message_ids)
                         page_count += 1
 
                         logger.info(
                             f"[{task_id}] [{account.account_email}] Fetched page {page_count}: "
-                            f"{len(message_ids)} IDs (total: {len(all_ids)})"
+                            f"{len(message_ids)} IDs (total: {total_ids_collected})"
                         )
+
+                        # Process batch incrementally every QUEUE_BATCH_SIZE IDs
+                        if len(current_batch) >= QUEUE_BATCH_SIZE:
+                            logger.info(
+                                f"[{task_id}] [{account.account_email}] "
+                                f"Processing batch of {len(current_batch)} IDs"
+                            )
+                            _process_id_batch(db, account, current_batch, task_id)
+                            current_batch = []  # Clear buffer
 
                     if not next_page_token:
                         break
@@ -110,82 +190,18 @@ def fetch_all_message_ids(user_id: str, account_label: str = None):
                     logger.error(f"[{task_id}] Error fetching IDs: {e}")
                     break
 
-            logger.info(
-                f"[{task_id}] [{account.account_email}] Fetched {len(all_ids)} total message IDs"
-            )
-
-            # Check which IDs already exist in Email table
-            existing_ids = set()
-            if all_ids:
-                existing = (
-                    db.query(Email.gmail_message_id)
-                    .filter(
-                        Email.account_id == account.id,
-                        Email.gmail_message_id.in_(all_ids),
-                    )
-                    .all()
+            # Process any remaining IDs
+            if current_batch:
+                logger.info(
+                    f"[{task_id}] [{account.account_email}] "
+                    f"Processing final batch of {len(current_batch)} IDs"
                 )
-                existing_ids = {row[0] for row in existing}
-
-            new_ids = [msg_id for msg_id in all_ids if msg_id not in existing_ids]
+                _process_id_batch(db, account, current_batch, task_id)
 
             logger.info(
                 f"[{task_id}] [{account.account_email}] "
-                f"{len(existing_ids)} already fetched, {len(new_ids)} new IDs to queue"
+                f"Completed: Fetched {total_ids_collected} total message IDs"
             )
-
-            # Insert new IDs into EmailQueue
-            if new_ids:
-                queue_records = [
-                    {
-                        "id": uuid.uuid4(),
-                        "account_id": account.id,
-                        "gmail_message_id": msg_id,
-                        "created_at": datetime.utcnow(),
-                    }
-                    for msg_id in new_ids
-                ]
-
-                # Batch insert in chunks of 1000
-                for i in range(0, len(queue_records), 1000):
-                    chunk = queue_records[i : i + 1000]
-                    stmt = insert(EmailQueue).on_conflict_do_nothing(
-                        index_elements=["account_id", "gmail_message_id"]
-                    )
-                    db.execute(stmt, chunk)
-                    db.commit()
-
-                logger.info(
-                    f"[{task_id}] [{account.account_email}] Queued {len(new_ids)} message IDs"
-                )
-
-            # Trigger worker tasks to fetch full messages
-            pending_count = (
-                db.query(func.count(EmailQueue.id))
-                .filter(
-                    EmailQueue.account_id == account.id,
-                    EmailQueue.claimed_by == None,
-                )
-                .scalar()
-            )
-
-            logger.info(
-                f"[{task_id}] [{account.account_email}] {pending_count} pending IDs in queue"
-            )
-
-            # Spawn worker tasks (one per batch)
-            num_batches = (pending_count + BATCH_SIZE - 1) // BATCH_SIZE
-            if num_batches > 0:
-                logger.info(
-                    f"[{task_id}] [{account.account_email}] Spawning {num_batches} worker tasks"
-                )
-
-                # Use Celery group to run tasks in parallel
-                tasks = [
-                    fetch_message_batch.s(str(account.id)) for _ in range(min(num_batches, 10))
-                ]
-                job = group(tasks)
-                job.apply_async()
     finally:
         db.close()
 
