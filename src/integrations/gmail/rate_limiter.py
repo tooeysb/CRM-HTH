@@ -126,7 +126,8 @@ class GmailRateLimiter:
             tokens: Number of tokens to acquire (default: 1)
 
         Returns:
-            True if tokens were acquired, False if rate limit exceeded
+            True if tokens were acquired, False if rate limit exceeded.
+            On Redis connection failure, returns None to signal fallback.
         """
         try:
             result = self._acquire_script(
@@ -134,13 +135,17 @@ class GmailRateLimiter:
                 args=[self.max_tokens, self.refill_rate, tokens, time.time()],
             )
             return bool(result)
-        except (redis.ConnectionError, redis.TimeoutError) as e:
-            logger.warning(f"Redis connection error in acquire: {e}")
-            return False
+        except (redis.ConnectionError, redis.TimeoutError):
+            # Signal caller to use local fallback
+            return None
 
     def wait_for_token(self, tokens: int = 1, timeout: float = 60.0) -> None:
         """
         Block until tokens are available or timeout is reached.
+
+        If Redis is unavailable, falls back to a local sleep-based delay
+        computed from the refill rate, so processing continues at a safe
+        pace instead of stalling.
 
         Args:
             tokens: Number of tokens to acquire (default: 1)
@@ -152,10 +157,23 @@ class GmailRateLimiter:
         start_time = time.time()
 
         while time.time() - start_time < timeout:
-            if self.acquire(tokens=tokens):
+            result = self.acquire(tokens=tokens)
+
+            if result is True:
                 return
 
-            # Sleep for time proportional to refill rate
+            if result is None:
+                # Redis unavailable - fall back to local sleep-based rate limiting
+                # Sleep for the time it would take to generate these tokens
+                fallback_delay = tokens / self.refill_rate
+                logger.debug(
+                    f"Redis unavailable, using local rate limit: sleeping {fallback_delay:.2f}s "
+                    f"for {tokens} tokens"
+                )
+                time.sleep(fallback_delay)
+                return
+
+            # result is False - tokens not available yet, wait and retry
             sleep_time = min(1.0 / self.refill_rate, 0.1)
             time.sleep(sleep_time)
 
