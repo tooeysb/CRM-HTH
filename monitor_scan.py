@@ -180,12 +180,12 @@ def restart_account_sync(account_email: str, reason: str):
         return False
 
     try:
-        # Import the task
-        from src.worker.tasks import scan_gmail_task
+        # Import the NEW ID-first task (much faster than pagination)
+        from src.worker.id_first_tasks import fetch_all_message_ids
 
-        # Trigger new scan task
-        task = scan_gmail_task.delay(user_id=user_id)
-        logger.info(f"[{account_email}] Started new scan task: {task.id}")
+        # Trigger new ID-first scan task
+        task = fetch_all_message_ids.delay(user_id=user_id)
+        logger.info(f"[{account_email}] Started new ID-first scan task: {task.id}")
         return True
 
     except Exception as e:
