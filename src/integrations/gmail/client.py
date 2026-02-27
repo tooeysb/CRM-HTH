@@ -225,8 +225,10 @@ class GmailClient:
         emails = []
 
         # Gmail batch API has a limit of 100 requests per batch
-        # Use chunks of 50 messages; the rate limiter handles pacing
-        chunk_size = 50
+        # Gmail also limits concurrent requests per user to ~10-20.
+        # Use chunks of 20 to stay under the concurrent limit while
+        # the rate limiter handles QPM pacing between chunks.
+        chunk_size = 20
         for i in range(0, len(message_ids), chunk_size):
             chunk = message_ids[i:i + chunk_size]
             batch_emails = self._fetch_batch_chunk(chunk, format)
