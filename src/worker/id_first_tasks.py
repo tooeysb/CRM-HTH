@@ -291,7 +291,7 @@ def fetch_message_batch(account_id: str):
                     "sender_email": email_dict.get("sender_email", ""),
                     "sender_name": email_dict.get("sender_name"),
                     "recipient_emails": email_dict.get("recipient_emails", ""),
-                    "date": email_dict.get("date", datetime.utcnow()),
+                    "date": email_dict.get("date") or datetime.utcnow(),
                     "summary": email_dict.get("snippet", "")[:500],
                     "has_attachments": email_dict.get("has_attachments", False),
                     "attachment_count": email_dict.get("attachment_count", 0),
@@ -319,6 +319,8 @@ def fetch_message_batch(account_id: str):
 
         except Exception as e:
             logger.error(f"[{task_id}] Error fetching messages: {e}")
+            # Rollback failed transaction before attempting unclaim
+            db.rollback()
             # Unclaim on error so another worker can retry
             db.query(EmailQueue).filter(EmailQueue.id.in_([r.id for r in claim_result])).update(
                 {"claimed_by": None, "claimed_at": None}, synchronize_session=False
