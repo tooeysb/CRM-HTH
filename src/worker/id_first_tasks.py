@@ -281,6 +281,14 @@ def fetch_message_batch(account_id: str):
             # Insert into Email table
             emails_to_insert = []
             for email_dict in email_dicts:
+                # Sanitize date: strip timezone info to avoid PostgreSQL
+                # rejecting invalid offsets (e.g. +18:00) from malformed headers
+                raw_date = email_dict.get("date")
+                if raw_date and hasattr(raw_date, "replace"):
+                    email_date = raw_date.replace(tzinfo=None)
+                else:
+                    email_date = datetime.utcnow()
+
                 email_data = {
                     "id": uuid.uuid4(),
                     "user_id": account.user_id,
@@ -291,7 +299,7 @@ def fetch_message_batch(account_id: str):
                     "sender_email": email_dict.get("sender_email", ""),
                     "sender_name": email_dict.get("sender_name"),
                     "recipient_emails": email_dict.get("recipient_emails", ""),
-                    "date": email_dict.get("date") or datetime.utcnow(),
+                    "date": email_date,
                     "summary": email_dict.get("snippet", "")[:500],
                     "has_attachments": email_dict.get("has_attachments", False),
                     "attachment_count": email_dict.get("attachment_count", 0),
