@@ -6,6 +6,8 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
 
 from src.core.config import settings
 
@@ -64,8 +66,20 @@ async def health_check():
 
 
 # Include routers
-from src.api.routers import auth, dashboard, scan
+from src.api.routers import auth, crm, dashboard, draft, scan
 
 app.include_router(auth.router, prefix="/auth", tags=["authentication"])
 app.include_router(scan.router, prefix="/scan", tags=["scanning"])
 app.include_router(dashboard.router, prefix="/dashboard", tags=["dashboard"])
+app.include_router(draft.router, prefix="/draft", tags=["draft"])
+app.include_router(crm.router, prefix="/crm/api", tags=["crm"])
+
+
+@app.get("/crm")
+async def crm_redirect():
+    """Redirect /crm to the CRM static frontend."""
+    return RedirectResponse(url="/crm/static/index.html")
+
+
+# Static file mounts (must be after all route registrations)
+app.mount("/crm/static", StaticFiles(directory="src/static/crm"), name="crm-static")

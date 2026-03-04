@@ -1,0 +1,1212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CRM</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+    <script src="/crm/static/app.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: {
+                            50: '#EEF2FF', 100: '#E0E7FF', 200: '#C7D2FE',
+                            300: '#A5B4FC', 400: '#818CF8', 500: '#6366F1',
+                            600: '#4F46E5', 700: '#4338CA', 800: '#3730A3',
+                            900: '#312E81'
+                        },
+                    },
+                    fontFamily: {
+                        sans: ['-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'Helvetica Neue', 'Arial', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        [x-cloak] { display: none !important; }
+        .spinner { animation: spin 0.6s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .slide-enter { transform: translateX(100%); }
+        .slide-leave { transform: translateX(100%); }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-900 antialiased font-sans">
+    <div x-data="crmApp()" x-cloak class="min-h-screen flex flex-col">
+
+        <!-- Top Navigation Bar -->
+        <nav class="bg-white border-b border-gray-200 sticky top-0 z-30">
+            <div class="max-w-screen-2xl mx-auto px-4 sm:px-6">
+                <div class="flex items-center justify-between h-14">
+                    <!-- Left: Logo + Nav -->
+                    <div class="flex items-center space-x-8">
+                        <span class="text-lg font-semibold text-primary-600 tracking-tight">CRM</span>
+                        <div class="hidden sm:flex items-center space-x-1">
+                            <button @click="navigate('dashboard')"
+                                :class="currentView === 'dashboard' ? 'bg-primary-50 text-primary-700' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'"
+                                class="px-3 py-1.5 rounded-md text-sm font-medium transition-colors">
+                                Dashboard
+                            </button>
+                            <button @click="navigate('contacts')"
+                                :class="currentView === 'contacts' ? 'bg-primary-50 text-primary-700' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'"
+                                class="px-3 py-1.5 rounded-md text-sm font-medium transition-colors">
+                                People
+                            </button>
+                            <button @click="navigate('companies')"
+                                :class="currentView === 'companies' ? 'bg-primary-50 text-primary-700' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'"
+                                class="px-3 py-1.5 rounded-md text-sm font-medium transition-colors">
+                                Companies
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Right: Search -->
+                    <div class="relative" @click.outside="showSearchResults = false" @keydown.escape.window="showSearchResults = false">
+                        <div class="relative">
+                            <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                            </svg>
+                            <input type="text"
+                                x-model="searchQuery"
+                                @input.debounce.300ms="globalSearch(searchQuery)"
+                                @focus="if (searchResults) showSearchResults = true"
+                                placeholder="Search..."
+                                class="w-48 sm:w-64 pl-9 pr-16 py-1.5 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white transition-all">
+                            <kbd class="absolute right-3 top-1/2 -translate-y-1/2 hidden sm:inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium text-gray-400 bg-gray-100 rounded border border-gray-200">
+                                <span class="text-xs mr-0.5">&#8984;</span>K
+                            </kbd>
+                        </div>
+
+                        <!-- Search Results Dropdown -->
+                        <div x-show="showSearchResults && searchResults"
+                            x-transition:enter="transition ease-out duration-150"
+                            x-transition:enter-start="opacity-0 -translate-y-1"
+                            x-transition:enter-end="opacity-100 translate-y-0"
+                            x-transition:leave="transition ease-in duration-100"
+                            x-transition:leave-start="opacity-100 translate-y-0"
+                            x-transition:leave-end="opacity-0 -translate-y-1"
+                            class="absolute right-0 mt-2 w-96 bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden z-50">
+                            <template x-if="searchResults && searchResults.contacts.length === 0 && searchResults.companies.length === 0">
+                                <div class="px-4 py-8 text-center text-sm text-gray-500">No results found</div>
+                            </template>
+                            <template x-if="searchResults && searchResults.contacts.length > 0">
+                                <div>
+                                    <div class="px-3 py-2 text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50 border-b border-gray-100">People</div>
+                                    <template x-for="c in searchResults.contacts" :key="c.id">
+                                        <button @click="openContactDetail(c.id); showSearchResults = false; searchQuery = ''"
+                                            class="w-full flex items-center px-3 py-2.5 hover:bg-gray-50 transition-colors text-left">
+                                            <div class="w-8 h-8 rounded-full bg-primary-100 text-primary-600 flex items-center justify-center text-xs font-medium flex-shrink-0"
+                                                x-text="c.name ? c.name.charAt(0).toUpperCase() : '?'"></div>
+                                            <div class="ml-3 min-w-0">
+                                                <div class="text-sm font-medium text-gray-900 truncate" x-text="c.name"></div>
+                                                <div class="text-xs text-gray-500 truncate" x-text="c.email"></div>
+                                            </div>
+                                            <div class="ml-auto pl-3 flex-shrink-0">
+                                                <span class="text-xs text-gray-400" x-text="c.company_name || ''"></span>
+                                            </div>
+                                        </button>
+                                    </template>
+                                </div>
+                            </template>
+                            <template x-if="searchResults && searchResults.companies.length > 0">
+                                <div>
+                                    <div class="px-3 py-2 text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50 border-b border-gray-100 border-t">Companies</div>
+                                    <template x-for="c in searchResults.companies" :key="c.id">
+                                        <button @click="openCompanyDetail(c.id); showSearchResults = false; searchQuery = ''"
+                                            class="w-full flex items-center px-3 py-2.5 hover:bg-gray-50 transition-colors text-left">
+                                            <div class="w-8 h-8 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center text-xs font-medium flex-shrink-0"
+                                                x-text="c.name ? c.name.charAt(0).toUpperCase() : '?'"></div>
+                                            <div class="ml-3 min-w-0">
+                                                <div class="text-sm font-medium text-gray-900 truncate" x-text="c.name"></div>
+                                                <div class="text-xs text-gray-500 truncate" x-text="c.domain || ''"></div>
+                                            </div>
+                                            <div class="ml-auto pl-3 flex-shrink-0">
+                                                <span class="text-xs text-gray-400" x-text="c.contact_count ? c.contact_count + ' contacts' : ''"></span>
+                                            </div>
+                                        </button>
+                                    </template>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Mobile Nav -->
+                <div class="sm:hidden flex items-center space-x-1 pb-2 -mx-1 overflow-x-auto">
+                    <button @click="navigate('dashboard')"
+                        :class="currentView === 'dashboard' ? 'bg-primary-50 text-primary-700' : 'text-gray-600'"
+                        class="px-3 py-1.5 rounded-md text-sm font-medium whitespace-nowrap">Dashboard</button>
+                    <button @click="navigate('contacts')"
+                        :class="currentView === 'contacts' ? 'bg-primary-50 text-primary-700' : 'text-gray-600'"
+                        class="px-3 py-1.5 rounded-md text-sm font-medium whitespace-nowrap">People</button>
+                    <button @click="navigate('companies')"
+                        :class="currentView === 'companies' ? 'bg-primary-50 text-primary-700' : 'text-gray-600'"
+                        class="px-3 py-1.5 rounded-md text-sm font-medium whitespace-nowrap">Companies</button>
+                </div>
+            </div>
+        </nav>
+
+        <!-- Main Content -->
+        <main class="flex-1 max-w-screen-2xl w-full mx-auto px-4 sm:px-6 py-6">
+
+            <!-- ==================== DASHBOARD VIEW ==================== -->
+            <div x-show="currentView === 'dashboard'">
+                <!-- Loading State -->
+                <template x-if="dashboard.loading">
+                    <div class="flex items-center justify-center py-20">
+                        <svg class="spinner w-6 h-6 text-primary-600" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                        </svg>
+                    </div>
+                </template>
+
+                <template x-if="!dashboard.loading && dashboard.data">
+                    <div>
+                        <!-- Stat Cards -->
+                        <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+                            <div class="bg-white rounded-xl border border-gray-200 p-5">
+                                <div class="flex items-center space-x-3">
+                                    <div class="w-10 h-10 rounded-lg bg-primary-50 flex items-center justify-center">
+                                        <svg class="w-5 h-5 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                                    </div>
+                                    <div>
+                                        <p class="text-2xl font-semibold text-gray-900" x-text="formatNumber(dashboard.data.total_contacts)"></p>
+                                        <p class="text-sm text-gray-500">Contacts</p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="bg-white rounded-xl border border-gray-200 p-5">
+                                <div class="flex items-center space-x-3">
+                                    <div class="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center">
+                                        <svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg>
+                                    </div>
+                                    <div>
+                                        <p class="text-2xl font-semibold text-gray-900" x-text="formatNumber(dashboard.data.total_companies)"></p>
+                                        <p class="text-sm text-gray-500">Companies</p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="bg-white rounded-xl border border-gray-200 p-5">
+                                <div class="flex items-center space-x-3">
+                                    <div class="w-10 h-10 rounded-lg bg-green-50 flex items-center justify-center">
+                                        <svg class="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+                                    </div>
+                                    <div>
+                                        <p class="text-2xl font-semibold text-gray-900" x-text="formatNumber(dashboard.data.total_emails)"></p>
+                                        <p class="text-sm text-gray-500">Emails</p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="bg-white rounded-xl border border-gray-200 p-5">
+                                <div class="flex items-center space-x-3">
+                                    <div class="w-10 h-10 rounded-lg bg-amber-50 flex items-center justify-center">
+                                        <svg class="w-5 h-5 text-amber-500" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/></svg>
+                                    </div>
+                                    <div>
+                                        <p class="text-2xl font-semibold text-gray-900" x-text="formatNumber(dashboard.data.vip_count)"></p>
+                                        <p class="text-sm text-gray-500">VIP Contacts</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="grid lg:grid-cols-3 gap-6">
+                            <!-- Top Contacts -->
+                            <div class="lg:col-span-1 bg-white rounded-xl border border-gray-200">
+                                <div class="px-5 py-4 border-b border-gray-100">
+                                    <h2 class="text-sm font-semibold text-gray-900">Top Contacts</h2>
+                                </div>
+                                <div class="divide-y divide-gray-50">
+                                    <template x-for="c in (dashboard.data.top_contacts || []).slice(0, 10)" :key="c.id">
+                                        <button @click="openContactDetail(c.id)"
+                                            class="w-full flex items-center px-5 py-3 hover:bg-gray-50 transition-colors text-left">
+                                            <div class="w-8 h-8 rounded-full bg-primary-100 text-primary-600 flex items-center justify-center text-xs font-medium flex-shrink-0"
+                                                x-text="c.name ? c.name.charAt(0).toUpperCase() : '?'"></div>
+                                            <div class="ml-3 min-w-0 flex-1">
+                                                <div class="flex items-center">
+                                                    <span class="text-sm font-medium text-gray-900 truncate" x-text="c.name"></span>
+                                                    <template x-if="c.is_vip">
+                                                        <svg class="w-3.5 h-3.5 text-amber-400 ml-1 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/></svg>
+                                                    </template>
+                                                </div>
+                                                <div class="text-xs text-gray-500 truncate" x-text="c.company_name || c.email"></div>
+                                            </div>
+                                            <span class="ml-2 text-xs font-medium text-gray-400 tabular-nums" x-text="formatNumber(c.email_count)"></span>
+                                        </button>
+                                    </template>
+                                </div>
+                            </div>
+
+                            <!-- Email Volume Chart -->
+                            <div class="lg:col-span-2 bg-white rounded-xl border border-gray-200">
+                                <div class="px-5 py-4 border-b border-gray-100">
+                                    <h2 class="text-sm font-semibold text-gray-900">Email Volume</h2>
+                                </div>
+                                <div class="p-5">
+                                    <canvas id="emailVolumeChart" height="260"></canvas>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Recent Emails -->
+                        <div class="mt-6 bg-white rounded-xl border border-gray-200">
+                            <div class="px-5 py-4 border-b border-gray-100">
+                                <h2 class="text-sm font-semibold text-gray-900">Recent Emails</h2>
+                            </div>
+                            <div class="divide-y divide-gray-50">
+                                <template x-for="(email, idx) in (dashboard.data.recent_emails || []).slice(0, 20)" :key="idx">
+                                    <div>
+                                        <div @click="email._expanded = !email._expanded" class="flex items-center px-5 py-3 hover:bg-gray-50 cursor-pointer transition-colors">
+                                            <div class="min-w-0 flex-1">
+                                                <div class="text-sm text-gray-900 truncate" x-text="email.subject || '(no subject)'"></div>
+                                                <div class="text-xs text-gray-500 mt-0.5">
+                                                    <span x-text="email.sender_name || email.sender_email"></span>
+                                                </div>
+                                            </div>
+                                            <svg class="w-4 h-4 ml-2 text-gray-400 flex-shrink-0 transition-transform duration-150"
+                                                :class="email._expanded ? 'rotate-180' : ''"
+                                                fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                                            <span class="ml-2 text-xs text-gray-400 whitespace-nowrap tabular-nums" x-text="timeAgo(email.date)"></span>
+                                        </div>
+                                        <div x-show="email._expanded"
+                                            x-transition:enter="transition ease-out duration-150"
+                                            x-transition:enter-start="opacity-0 -translate-y-1"
+                                            x-transition:enter-end="opacity-100 translate-y-0"
+                                            x-transition:leave="transition ease-in duration-100"
+                                            x-transition:leave-start="opacity-100"
+                                            x-transition:leave-end="opacity-0"
+                                            class="px-5 pb-3">
+                                            <div class="text-xs text-gray-500 mb-2">
+                                                <span x-text="email.sender_name || email.sender_email"></span>
+                                                <span class="mx-1">&middot;</span>
+                                                <span x-text="formatDate(email.date)"></span>
+                                            </div>
+                                            <template x-if="email.body">
+                                                <div class="text-sm text-gray-700 whitespace-pre-wrap max-h-96 overflow-y-auto bg-gray-50 rounded-lg p-3 leading-relaxed" x-text="email.body"></div>
+                                            </template>
+                                            <template x-if="!email.body && email.summary">
+                                                <div class="text-sm text-gray-600 bg-gray-50 rounded-lg p-3" x-text="email.summary"></div>
+                                            </template>
+                                            <template x-if="!email.body && !email.summary">
+                                                <p class="text-sm text-gray-400 italic">No email body available</p>
+                                            </template>
+                                        </div>
+                                    </div>
+                                </template>
+                                <template x-if="!dashboard.data.recent_emails || dashboard.data.recent_emails.length === 0">
+                                    <div class="px-5 py-8 text-center text-sm text-gray-500">No recent emails</div>
+                                </template>
+                            </div>
+                        </div>
+                    </div>
+                </template>
+            </div>
+
+            <!-- ==================== PEOPLE VIEW ==================== -->
+            <div x-show="currentView === 'contacts'">
+                <!-- Filter Bar -->
+                <div class="mb-4 space-y-3">
+                    <div class="flex flex-col sm:flex-row sm:items-center gap-3">
+                        <div class="relative flex-1">
+                            <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                            </svg>
+                            <input type="text" x-model="contacts.search"
+                                @input.debounce.300ms="contacts.page = 1; loadContacts()"
+                                placeholder="Search contacts..."
+                                class="w-full pl-9 pr-4 py-2 text-sm bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent">
+                        </div>
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <button @click="contacts.filters.is_vip = contacts.filters.is_vip ? null : true; contacts.page = 1; loadContacts()"
+                                :class="contacts.filters.is_vip ? 'bg-amber-50 border-amber-300 text-amber-700' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'"
+                                class="inline-flex items-center px-3 py-2 text-sm border rounded-lg transition-colors">
+                                <svg class="w-4 h-4 mr-1" :class="contacts.filters.is_vip ? 'text-amber-500' : 'text-gray-400'" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/></svg>
+                                VIP
+                            </button>
+                            <button @click="contacts.filters.tags = contacts.filters.tags === 'critical' ? '' : 'critical'; contacts.page = 1; loadContacts()"
+                                :class="contacts.filters.tags === 'critical' ? 'bg-red-50 border-red-300 text-red-700' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'"
+                                class="inline-flex items-center px-3 py-2 text-sm border rounded-lg transition-colors">
+                                <svg class="w-4 h-4 mr-1" :class="contacts.filters.tags === 'critical' ? 'text-red-500' : 'text-gray-400'" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4.5c-.77-.833-2.694-.833-3.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg>
+                                Critical
+                            </button>
+                            <button @click="contacts.filters.tags = contacts.filters.tags === 'customer' ? '' : 'customer'; contacts.page = 1; loadContacts()"
+                                :class="contacts.filters.tags === 'customer' ? 'bg-green-50 border-green-300 text-green-700' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'"
+                                class="inline-flex items-center px-3 py-2 text-sm border rounded-lg transition-colors">
+                                <svg class="w-4 h-4 mr-1" :class="contacts.filters.tags === 'customer' ? 'text-green-500' : 'text-gray-400'" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                                Customer
+                            </button>
+                            <select x-model="contacts.filters.contact_type"
+                                @change="contacts.page = 1; loadContacts()"
+                                class="px-3 py-2 text-sm bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500">
+                                <option value="">All Types</option>
+                                <option value="Champion">Champion</option>
+                                <option value="Decision Maker">Decision Maker</option>
+                                <option value="Influencer">Influencer</option>
+                                <option value="End User">End User</option>
+                                <option value="Executive Sponsor">Executive Sponsor</option>
+                                <option value="Blocker">Blocker</option>
+                            </select>
+                            <div class="relative">
+                                <input type="text" x-model="contacts.filters.tags"
+                                    @input.debounce.500ms="contacts.page = 1; loadContacts()"
+                                    placeholder="Filter by tag..."
+                                    class="w-32 px-3 py-2 text-sm bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500">
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Active Filters -->
+                    <div x-show="contacts.filters.is_vip || contacts.filters.contact_type || contacts.filters.tags || contacts.search"
+                        class="flex items-center gap-2 flex-wrap">
+                        <span class="text-xs text-gray-500">Filters:</span>
+                        <template x-if="contacts.search">
+                            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-gray-100 text-gray-700">
+                                Search: <span x-text="contacts.search" class="ml-1 font-medium"></span>
+                                <button @click="contacts.search = ''; contacts.page = 1; loadContacts()" class="ml-1 text-gray-400 hover:text-gray-600">&times;</button>
+                            </span>
+                        </template>
+                        <template x-if="contacts.filters.is_vip">
+                            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-amber-100 text-amber-700">
+                                VIP
+                                <button @click="contacts.filters.is_vip = null; contacts.page = 1; loadContacts()" class="ml-1 text-amber-400 hover:text-amber-600">&times;</button>
+                            </span>
+                        </template>
+                        <template x-if="contacts.filters.contact_type">
+                            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-primary-100 text-primary-700">
+                                <span x-text="contacts.filters.contact_type"></span>
+                                <button @click="contacts.filters.contact_type = ''; contacts.page = 1; loadContacts()" class="ml-1 text-primary-400 hover:text-primary-600">&times;</button>
+                            </span>
+                        </template>
+                        <template x-if="contacts.filters.tags">
+                            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-green-100 text-green-700">
+                                Tag: <span x-text="contacts.filters.tags" class="ml-1 font-medium"></span>
+                                <button @click="contacts.filters.tags = ''; contacts.page = 1; loadContacts()" class="ml-1 text-green-400 hover:text-green-600">&times;</button>
+                            </span>
+                        </template>
+                    </div>
+                </div>
+
+                <!-- Loading -->
+                <template x-if="contacts.loading">
+                    <div class="flex items-center justify-center py-20">
+                        <svg class="spinner w-6 h-6 text-primary-600" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                        </svg>
+                    </div>
+                </template>
+
+                <!-- Table -->
+                <div x-show="!contacts.loading" class="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                    <div class="overflow-x-auto">
+                        <table class="w-full">
+                            <thead>
+                                <tr class="border-b border-gray-100">
+                                    <th class="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        <button @click="toggleSort('contacts', 'name')" class="inline-flex items-center hover:text-gray-700">
+                                            Name
+                                            <template x-if="contacts.sortBy === 'name'">
+                                                <svg class="w-3 h-3 ml-1" fill="currentColor" viewBox="0 0 20 20"><path :d="contacts.sortDir === 'asc' ? 'M5 10l5-5 5 5H5z' : 'M5 10l5 5 5-5H5z'"/></svg>
+                                            </template>
+                                        </button>
+                                    </th>
+                                    <th class="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider hidden lg:table-cell">Company</th>
+                                    <th class="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider hidden md:table-cell">Type</th>
+                                    <th class="text-right px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        <button @click="toggleSort('contacts', 'email_count')" class="inline-flex items-center hover:text-gray-700">
+                                            Emails
+                                            <template x-if="contacts.sortBy === 'email_count'">
+                                                <svg class="w-3 h-3 ml-1" fill="currentColor" viewBox="0 0 20 20"><path :d="contacts.sortDir === 'asc' ? 'M5 10l5-5 5 5H5z' : 'M5 10l5 5 5-5H5z'"/></svg>
+                                            </template>
+                                        </button>
+                                    </th>
+                                    <th class="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider hidden sm:table-cell">
+                                        <button @click="toggleSort('contacts', 'last_contact_at')" class="inline-flex items-center hover:text-gray-700">
+                                            Last Contact
+                                            <template x-if="contacts.sortBy === 'last_contact_at'">
+                                                <svg class="w-3 h-3 ml-1" fill="currentColor" viewBox="0 0 20 20"><path :d="contacts.sortDir === 'asc' ? 'M5 10l5-5 5 5H5z' : 'M5 10l5 5 5-5H5z'"/></svg>
+                                            </template>
+                                        </button>
+                                    </th>
+                                    <th class="text-center px-3 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider w-12">VIP</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-gray-50">
+                                <template x-for="c in contacts.items" :key="c.id">
+                                    <tr @click="openContactDetail(c.id)" class="hover:bg-gray-50 cursor-pointer transition-colors">
+                                        <td class="px-5 py-3">
+                                            <div class="flex items-center">
+                                                <div class="w-8 h-8 rounded-full bg-primary-100 text-primary-600 flex items-center justify-center text-xs font-medium flex-shrink-0"
+                                                    x-text="c.name ? c.name.charAt(0).toUpperCase() : '?'"></div>
+                                                <div class="ml-3 min-w-0">
+                                                    <div class="text-sm font-medium text-gray-900 truncate" x-text="c.name || '(unknown)'"></div>
+                                                    <div class="text-xs text-gray-500 truncate" x-text="c.email"></div>
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td class="px-5 py-3 hidden lg:table-cell">
+                                            <template x-if="c.company">
+                                                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700" x-text="c.company.name"></span>
+                                            </template>
+                                        </td>
+                                        <td class="px-5 py-3 hidden md:table-cell">
+                                            <template x-if="c.contact_type">
+                                                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium"
+                                                    :class="contactTypeBadge(c.contact_type)"
+                                                    x-text="c.contact_type"></span>
+                                            </template>
+                                        </td>
+                                        <td class="px-5 py-3 text-right">
+                                            <span class="text-sm tabular-nums text-gray-700" x-text="formatNumber(c.email_count)"></span>
+                                        </td>
+                                        <td class="px-5 py-3 hidden sm:table-cell">
+                                            <span class="text-xs text-gray-500" x-text="c.last_contact_at ? timeAgo(c.last_contact_at) : 'Never'"></span>
+                                        </td>
+                                        <td class="px-3 py-3 text-center">
+                                            <button @click.stop="toggleVip(c)" class="p-0.5 hover:scale-110 transition-transform">
+                                                <svg class="w-4 h-4" :class="c.is_vip ? 'text-amber-400' : 'text-gray-300 hover:text-gray-400'" fill="currentColor" viewBox="0 0 20 20">
+                                                    <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/>
+                                                </svg>
+                                            </button>
+                                        </td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- Empty State -->
+                    <template x-if="!contacts.loading && contacts.items.length === 0">
+                        <div class="px-5 py-12 text-center">
+                            <svg class="mx-auto w-12 h-12 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                            <p class="mt-3 text-sm text-gray-500">No contacts found</p>
+                        </div>
+                    </template>
+
+                    <!-- Pagination -->
+                    <div x-show="contacts.totalPages > 1" class="flex items-center justify-between px-5 py-3 border-t border-gray-100">
+                        <div class="text-sm text-gray-500">
+                            Showing <span x-text="((contacts.page - 1) * contacts.pageSize) + 1"></span>-<span x-text="Math.min(contacts.page * contacts.pageSize, contacts.total)"></span> of <span x-text="formatNumber(contacts.total)"></span>
+                        </div>
+                        <div class="flex items-center space-x-2">
+                            <button @click="contacts.page--; loadContacts()" :disabled="contacts.page <= 1"
+                                class="px-3 py-1.5 text-sm border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                                Previous
+                            </button>
+                            <span class="text-sm text-gray-600">
+                                Page <input type="number" :value="contacts.page" @change="contacts.page = Math.max(1, Math.min(parseInt($event.target.value) || 1, contacts.totalPages)); loadContacts()"
+                                    class="w-12 text-center border border-gray-200 rounded px-1 py-0.5 text-sm"
+                                    :min="1" :max="contacts.totalPages"> of <span x-text="contacts.totalPages"></span>
+                            </span>
+                            <button @click="contacts.page++; loadContacts()" :disabled="contacts.page >= contacts.totalPages"
+                                class="px-3 py-1.5 text-sm border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                                Next
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ==================== COMPANIES VIEW ==================== -->
+            <div x-show="currentView === 'companies'">
+                <!-- Filter Bar -->
+                <div class="mb-4">
+                    <div class="flex flex-col sm:flex-row sm:items-center gap-3">
+                        <div class="relative flex-1">
+                            <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                            </svg>
+                            <input type="text" x-model="companies.search"
+                                @input.debounce.300ms="companies.page = 1; loadCompanies()"
+                                placeholder="Search companies..."
+                                class="w-full pl-9 pr-4 py-2 text-sm bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent">
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <select x-model="companies.filters.company_type"
+                                @change="companies.page = 1; loadCompanies()"
+                                class="px-3 py-2 text-sm bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500">
+                                <option value="">All Types</option>
+                                <option value="Customer">Customer</option>
+                                <option value="Prospect">Prospect</option>
+                                <option value="Partner">Partner</option>
+                                <option value="Vendor">Vendor</option>
+                            </select>
+                            <select x-model="companies.filters.account_tier"
+                                @change="companies.page = 1; loadCompanies()"
+                                class="px-3 py-2 text-sm bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500">
+                                <option value="">All Tiers</option>
+                                <option value="Enterprise">Enterprise</option>
+                                <option value="Mid-Market">Mid-Market</option>
+                                <option value="SMB">SMB</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Loading -->
+                <template x-if="companies.loading">
+                    <div class="flex items-center justify-center py-20">
+                        <svg class="spinner w-6 h-6 text-primary-600" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                        </svg>
+                    </div>
+                </template>
+
+                <!-- Table -->
+                <div x-show="!companies.loading" class="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                    <div class="overflow-x-auto">
+                        <table class="w-full">
+                            <thead>
+                                <tr class="border-b border-gray-100">
+                                    <th class="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        <button @click="toggleSort('companies', 'name')" class="inline-flex items-center hover:text-gray-700">
+                                            Name
+                                            <template x-if="companies.sortBy === 'name'">
+                                                <svg class="w-3 h-3 ml-1" fill="currentColor" viewBox="0 0 20 20"><path :d="companies.sortDir === 'asc' ? 'M5 10l5-5 5 5H5z' : 'M5 10l5 5 5-5H5z'"/></svg>
+                                            </template>
+                                        </button>
+                                    </th>
+                                    <th class="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider hidden lg:table-cell">Industry</th>
+                                    <th class="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider hidden md:table-cell">Type</th>
+                                    <th class="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider hidden md:table-cell">Tier</th>
+                                    <th class="text-right px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        <button @click="toggleSort('companies', 'arr')" class="inline-flex items-center hover:text-gray-700">
+                                            ARR
+                                            <template x-if="companies.sortBy === 'arr'">
+                                                <svg class="w-3 h-3 ml-1" fill="currentColor" viewBox="0 0 20 20"><path :d="companies.sortDir === 'asc' ? 'M5 10l5-5 5 5H5z' : 'M5 10l5 5 5-5H5z'"/></svg>
+                                            </template>
+                                        </button>
+                                    </th>
+                                    <th class="text-right px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider hidden sm:table-cell">Contacts</th>
+                                    <th class="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider hidden xl:table-cell">Owner</th>
+                                    <th class="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider hidden xl:table-cell">Renewal</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-gray-50">
+                                <template x-for="c in companies.items" :key="c.id">
+                                    <tr @click="openCompanyDetail(c.id)" class="hover:bg-gray-50 cursor-pointer transition-colors">
+                                        <td class="px-5 py-3">
+                                            <div class="min-w-0">
+                                                <div class="flex items-center">
+                                                    <span class="text-sm font-medium text-gray-900 truncate" x-text="c.name"></span>
+                                                    <template x-if="c.source_data?.enr?.rank_2024">
+                                                        <span class="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-orange-100 text-orange-700 flex-shrink-0"
+                                                            x-text="'ENR #' + c.source_data.enr.rank_2024"></span>
+                                                    </template>
+                                                </div>
+                                                <div class="text-xs text-gray-500 truncate" x-text="c.domain || ''"></div>
+                                            </div>
+                                        </td>
+                                        <td class="px-5 py-3 hidden lg:table-cell">
+                                            <span class="text-sm text-gray-600" x-text="c.industry || '-'"></span>
+                                        </td>
+                                        <td class="px-5 py-3 hidden md:table-cell">
+                                            <template x-if="c.company_type">
+                                                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium"
+                                                    :class="companyTypeBadge(c.company_type)"
+                                                    x-text="c.company_type"></span>
+                                            </template>
+                                        </td>
+                                        <td class="px-5 py-3 hidden md:table-cell">
+                                            <template x-if="c.account_tier">
+                                                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium"
+                                                    :class="tierBadge(c.account_tier)"
+                                                    x-text="c.account_tier"></span>
+                                            </template>
+                                        </td>
+                                        <td class="px-5 py-3 text-right">
+                                            <span class="text-sm font-medium tabular-nums text-gray-700" x-text="c.arr ? formatCurrency(c.arr) : '-'"></span>
+                                        </td>
+                                        <td class="px-5 py-3 text-right hidden sm:table-cell">
+                                            <span class="text-sm tabular-nums text-gray-600" x-text="c.contact_count || 0"></span>
+                                        </td>
+                                        <td class="px-5 py-3 hidden xl:table-cell">
+                                            <span class="text-sm text-gray-600" x-text="c.account_owner || '-'"></span>
+                                        </td>
+                                        <td class="px-5 py-3 hidden xl:table-cell">
+                                            <span class="text-sm" :class="isRenewalSoon(c.renewal_date) ? 'text-red-600 font-medium' : 'text-gray-600'"
+                                                x-text="c.renewal_date ? formatDate(c.renewal_date) : '-'"></span>
+                                        </td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- Empty State -->
+                    <template x-if="!companies.loading && companies.items.length === 0">
+                        <div class="px-5 py-12 text-center">
+                            <svg class="mx-auto w-12 h-12 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg>
+                            <p class="mt-3 text-sm text-gray-500">No companies found</p>
+                        </div>
+                    </template>
+
+                    <!-- Pagination -->
+                    <div x-show="companies.totalPages > 1" class="flex items-center justify-between px-5 py-3 border-t border-gray-100">
+                        <div class="text-sm text-gray-500">
+                            Showing <span x-text="((companies.page - 1) * companies.pageSize) + 1"></span>-<span x-text="Math.min(companies.page * companies.pageSize, companies.total)"></span> of <span x-text="formatNumber(companies.total)"></span>
+                        </div>
+                        <div class="flex items-center space-x-2">
+                            <button @click="companies.page--; loadCompanies()" :disabled="companies.page <= 1"
+                                class="px-3 py-1.5 text-sm border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                                Previous
+                            </button>
+                            <span class="text-sm text-gray-600">
+                                Page <input type="number" :value="companies.page" @change="companies.page = Math.max(1, Math.min(parseInt($event.target.value) || 1, companies.totalPages)); loadCompanies()"
+                                    class="w-12 text-center border border-gray-200 rounded px-1 py-0.5 text-sm"
+                                    :min="1" :max="companies.totalPages"> of <span x-text="companies.totalPages"></span>
+                            </span>
+                            <button @click="companies.page++; loadCompanies()" :disabled="companies.page >= companies.totalPages"
+                                class="px-3 py-1.5 text-sm border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                                Next
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- ==================== DETAIL SLIDE-OVER PANEL ==================== -->
+        <div x-show="detail.show" class="fixed inset-0 z-40" x-cloak>
+            <!-- Backdrop -->
+            <div x-show="detail.show"
+                x-transition:enter="transition ease-out duration-200"
+                x-transition:enter-start="opacity-0"
+                x-transition:enter-end="opacity-100"
+                x-transition:leave="transition ease-in duration-150"
+                x-transition:leave-start="opacity-100"
+                x-transition:leave-end="opacity-0"
+                @click="closeDetail()"
+                class="absolute inset-0 bg-black/20"></div>
+
+            <!-- Panel -->
+            <div x-show="detail.show"
+                x-transition:enter="transition ease-out duration-200"
+                x-transition:enter-start="translate-x-full"
+                x-transition:enter-end="translate-x-0"
+                x-transition:leave="transition ease-in duration-150"
+                x-transition:leave-start="translate-x-0"
+                x-transition:leave-end="translate-x-full"
+                class="absolute right-0 top-0 bottom-0 w-full md:w-1/2 bg-white shadow-xl border-l border-gray-200 overflow-y-auto">
+
+                <!-- Close -->
+                <button @click="closeDetail()" class="absolute top-4 right-4 p-1.5 rounded-lg hover:bg-gray-100 transition-colors z-10">
+                    <svg class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                </button>
+
+                <!-- Loading -->
+                <template x-if="detail.loading">
+                    <div class="flex items-center justify-center py-20">
+                        <svg class="spinner w-6 h-6 text-primary-600" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                        </svg>
+                    </div>
+                </template>
+
+                <!-- ===== CONTACT DETAIL ===== -->
+                <template x-if="!detail.loading && detail.type === 'contact' && detail.data">
+                    <div class="pb-8">
+                        <!-- Header -->
+                        <div class="px-6 pt-6 pb-4 border-b border-gray-100">
+                            <div class="flex items-start pr-8">
+                                <div class="w-12 h-12 rounded-full bg-primary-100 text-primary-600 flex items-center justify-center text-lg font-semibold flex-shrink-0"
+                                    x-text="detail.data.contact.name ? detail.data.contact.name.charAt(0).toUpperCase() : '?'"></div>
+                                <div class="ml-4 min-w-0 flex-1">
+                                    <div class="flex items-center">
+                                        <h2 class="text-xl font-semibold text-gray-900 truncate" x-text="detail.data.contact.name || '(unknown)'"></h2>
+                                        <button @click="toggleVipDetail()" class="ml-2 p-0.5">
+                                            <svg class="w-5 h-5" :class="detail.data.contact.is_vip ? 'text-amber-400' : 'text-gray-300 hover:text-gray-400'" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/></svg>
+                                        </button>
+                                    </div>
+                                    <p class="text-sm text-gray-500 mt-0.5" x-text="detail.data.contact.email"></p>
+                                    <template x-if="detail.data.contact.company">
+                                        <button @click="openCompanyDetail(detail.data.contact.company.id)"
+                                            class="inline-flex items-center mt-1.5 px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 transition-colors"
+                                            x-text="detail.data.contact.company.name"></button>
+                                    </template>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Quick Info Grid -->
+                        <div class="px-6 py-4 border-b border-gray-100">
+                            <div class="grid grid-cols-2 gap-4">
+                                <!-- Title (inline editable) -->
+                                <div>
+                                    <label class="text-xs font-medium text-gray-500 uppercase tracking-wider">Title</label>
+                                    <div @click="startEditing('title', detail.data.contact.title || '')" class="mt-1">
+                                        <template x-if="editing.field !== 'title'">
+                                            <p class="text-sm text-gray-900 cursor-pointer hover:bg-gray-50 rounded px-1 -mx-1 py-0.5"
+                                                x-text="detail.data.contact.title || 'Click to add'"></p>
+                                        </template>
+                                        <template x-if="editing.field === 'title'">
+                                            <input type="text" x-model="editing.value"
+                                                @blur="saveField('title')" @keydown.enter="saveField('title')" @keydown.escape="cancelEditing()"
+                                                x-ref="editInput"
+                                                class="w-full text-sm border border-primary-300 rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-primary-500">
+                                        </template>
+                                    </div>
+                                </div>
+                                <!-- Phone (inline editable) -->
+                                <div>
+                                    <label class="text-xs font-medium text-gray-500 uppercase tracking-wider">Phone</label>
+                                    <div @click="startEditing('phone', detail.data.contact.phone || '')" class="mt-1">
+                                        <template x-if="editing.field !== 'phone'">
+                                            <p class="text-sm text-gray-900 cursor-pointer hover:bg-gray-50 rounded px-1 -mx-1 py-0.5"
+                                                x-text="detail.data.contact.phone || 'Click to add'"></p>
+                                        </template>
+                                        <template x-if="editing.field === 'phone'">
+                                            <input type="text" x-model="editing.value"
+                                                @blur="saveField('phone')" @keydown.enter="saveField('phone')" @keydown.escape="cancelEditing()"
+                                                class="w-full text-sm border border-primary-300 rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-primary-500">
+                                        </template>
+                                    </div>
+                                </div>
+                                <!-- Contact Type -->
+                                <div>
+                                    <label class="text-xs font-medium text-gray-500 uppercase tracking-wider">Type</label>
+                                    <div class="mt-1">
+                                        <template x-if="editing.field !== 'contact_type'">
+                                            <button @click="startEditing('contact_type', detail.data.contact.contact_type || '')"
+                                                class="text-sm text-gray-900 cursor-pointer hover:bg-gray-50 rounded px-1 -mx-1 py-0.5">
+                                                <span x-text="detail.data.contact.contact_type || 'Set type'"></span>
+                                            </button>
+                                        </template>
+                                        <template x-if="editing.field === 'contact_type'">
+                                            <select x-model="editing.value"
+                                                @change="saveField('contact_type')" @blur="cancelEditing()"
+                                                class="w-full text-sm border border-primary-300 rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-primary-500">
+                                                <option value="">None</option>
+                                                <option value="Champion">Champion</option>
+                                                <option value="Decision Maker">Decision Maker</option>
+                                                <option value="Influencer">Influencer</option>
+                                                <option value="End User">End User</option>
+                                                <option value="Executive Sponsor">Executive Sponsor</option>
+                                                <option value="Blocker">Blocker</option>
+                                            </select>
+                                        </template>
+                                    </div>
+                                </div>
+                                <!-- Relationship Context -->
+                                <div>
+                                    <label class="text-xs font-medium text-gray-500 uppercase tracking-wider">Relationship</label>
+                                    <p class="mt-1 text-sm text-gray-900" x-text="detail.data.contact.relationship_context || '-'"></p>
+                                </div>
+                                <!-- Account Sources -->
+                                <div>
+                                    <label class="text-xs font-medium text-gray-500 uppercase tracking-wider">Sources</label>
+                                    <div class="mt-1 flex flex-wrap gap-1">
+                                        <template x-for="src in (detail.data.contact.account_sources || [])" :key="src">
+                                            <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium bg-blue-50 text-blue-700" x-text="src"></span>
+                                        </template>
+                                    </div>
+                                </div>
+                                <!-- Last Contact -->
+                                <div>
+                                    <label class="text-xs font-medium text-gray-500 uppercase tracking-wider">Last Contact</label>
+                                    <p class="mt-1 text-sm text-gray-900" x-text="detail.data.contact.last_contact_at ? formatDate(detail.data.contact.last_contact_at) : '-'"></p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Tags Section -->
+                        <div class="px-6 py-4 border-b border-gray-100">
+                            <label class="text-xs font-medium text-gray-500 uppercase tracking-wider">Tags</label>
+                            <div class="mt-2 flex flex-wrap items-center gap-1.5">
+                                <template x-for="(tag, idx) in (detail.data.contact.tags || [])" :key="idx">
+                                    <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-primary-50 text-primary-700">
+                                        <span x-text="tag"></span>
+                                        <button @click="removeTag(idx)" class="ml-1 text-primary-400 hover:text-primary-600">&times;</button>
+                                    </span>
+                                </template>
+                                <input type="text" x-model="newTag" @keydown.enter.prevent="addTag()" placeholder="Add tag..."
+                                    class="w-24 text-xs border-0 border-b border-gray-200 px-1 py-0.5 focus:outline-none focus:border-primary-500 bg-transparent">
+                            </div>
+                        </div>
+
+                        <!-- AI Relationship Profile -->
+                        <template x-if="detail.data.relationship_profile && detail.data.relationship_profile.profile_data">
+                            <div class="mx-6 my-4 rounded-xl bg-primary-50/50 border border-primary-100 p-5">
+                                <div class="flex items-center mb-3">
+                                    <svg class="w-4 h-4 text-primary-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
+                                    <h3 class="text-sm font-semibold text-primary-900">AI Relationship Profile</h3>
+                                </div>
+                                <!-- Summary -->
+                                <template x-if="detail.data.relationship_profile.profile_data.summary">
+                                    <div class="mb-3">
+                                        <p class="text-sm text-gray-800 leading-relaxed" x-text="detail.data.relationship_profile.profile_data.summary"></p>
+                                    </div>
+                                </template>
+                                <!-- Opinion -->
+                                <template x-if="detail.data.relationship_profile.profile_data.opinion">
+                                    <div class="mb-3">
+                                        <label class="text-xs font-medium text-primary-700 uppercase tracking-wider">Opinion</label>
+                                        <p class="mt-1 text-sm text-gray-700" x-text="detail.data.relationship_profile.profile_data.opinion"></p>
+                                    </div>
+                                </template>
+                                <!-- Topics -->
+                                <template x-if="detail.data.relationship_profile.profile_data.topics && detail.data.relationship_profile.profile_data.topics.length > 0">
+                                    <div class="mb-3">
+                                        <label class="text-xs font-medium text-primary-700 uppercase tracking-wider">Topics</label>
+                                        <div class="mt-1 flex flex-wrap gap-1">
+                                            <template x-for="topic in detail.data.relationship_profile.profile_data.topics" :key="topic">
+                                                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-white text-primary-700 border border-primary-200" x-text="topic"></span>
+                                            </template>
+                                        </div>
+                                    </div>
+                                </template>
+                                <!-- Communication Style -->
+                                <template x-if="detail.data.relationship_profile.profile_data.communication_style">
+                                    <div class="mb-3">
+                                        <label class="text-xs font-medium text-primary-700 uppercase tracking-wider">Communication Style</label>
+                                        <p class="mt-1 text-sm text-gray-700" x-text="detail.data.relationship_profile.profile_data.communication_style"></p>
+                                    </div>
+                                </template>
+                                <!-- Notable Events -->
+                                <template x-if="detail.data.relationship_profile.profile_data.notable_events && detail.data.relationship_profile.profile_data.notable_events.length > 0">
+                                    <div class="mb-3">
+                                        <label class="text-xs font-medium text-primary-700 uppercase tracking-wider">Notable Events</label>
+                                        <ul class="mt-1 space-y-1">
+                                            <template x-for="evt in detail.data.relationship_profile.profile_data.notable_events" :key="evt">
+                                                <li class="text-sm text-gray-700 flex items-start">
+                                                    <span class="text-primary-400 mr-2 mt-1 flex-shrink-0">&bull;</span>
+                                                    <span x-text="evt"></span>
+                                                </li>
+                                            </template>
+                                        </ul>
+                                    </div>
+                                </template>
+                                <!-- Stats Row -->
+                                <div class="mt-4 pt-3 border-t border-primary-100 grid grid-cols-2 sm:grid-cols-3 gap-3">
+                                    <div>
+                                        <span class="text-[11px] text-primary-600 uppercase tracking-wider">Sent</span>
+                                        <p class="text-sm font-medium text-gray-900" x-text="formatNumber(detail.data.relationship_profile.sent_count || 0)"></p>
+                                    </div>
+                                    <div>
+                                        <span class="text-[11px] text-primary-600 uppercase tracking-wider">Received</span>
+                                        <p class="text-sm font-medium text-gray-900" x-text="formatNumber(detail.data.relationship_profile.received_count || 0)"></p>
+                                    </div>
+                                    <div>
+                                        <span class="text-[11px] text-primary-600 uppercase tracking-wider">Threads</span>
+                                        <p class="text-sm font-medium text-gray-900" x-text="formatNumber(detail.data.relationship_profile.thread_count || 0)"></p>
+                                    </div>
+                                    <div>
+                                        <span class="text-[11px] text-primary-600 uppercase tracking-wider">Avg Response</span>
+                                        <p class="text-sm font-medium text-gray-900" x-text="detail.data.relationship_profile.avg_response_time_hours ? detail.data.relationship_profile.avg_response_time_hours.toFixed(1) + 'h' : '-'"></p>
+                                    </div>
+                                    <div>
+                                        <span class="text-[11px] text-primary-600 uppercase tracking-wider">First Email</span>
+                                        <p class="text-sm font-medium text-gray-900" x-text="detail.data.relationship_profile.first_exchange_date ? formatDate(detail.data.relationship_profile.first_exchange_date) : '-'"></p>
+                                    </div>
+                                    <div>
+                                        <span class="text-[11px] text-primary-600 uppercase tracking-wider">Last Email</span>
+                                        <p class="text-sm font-medium text-gray-900" x-text="detail.data.relationship_profile.last_exchange_date ? formatDate(detail.data.relationship_profile.last_exchange_date) : '-'"></p>
+                                    </div>
+                                </div>
+                            </div>
+                        </template>
+
+                        <!-- Notes -->
+                        <div class="px-6 py-4 border-b border-gray-100">
+                            <label class="text-xs font-medium text-gray-500 uppercase tracking-wider">Notes</label>
+                            <textarea x-model="detail.data.contact.notes"
+                                @input.debounce.1000ms="saveNotes('contact')"
+                                placeholder="Add notes..."
+                                rows="3"
+                                class="mt-2 w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent resize-y"></textarea>
+                        </div>
+
+                        <!-- Email Stats -->
+                        <template x-if="detail.data.email_stats">
+                            <div class="px-6 py-4 border-b border-gray-100">
+                                <label class="text-xs font-medium text-gray-500 uppercase tracking-wider">Email Stats</label>
+                                <div class="mt-2 grid grid-cols-3 gap-3">
+                                    <div class="bg-gray-50 rounded-lg p-3 text-center">
+                                        <p class="text-lg font-semibold text-gray-900" x-text="formatNumber(detail.data.email_stats.total)"></p>
+                                        <p class="text-[11px] text-gray-500">Total</p>
+                                    </div>
+                                    <div class="bg-gray-50 rounded-lg p-3 text-center">
+                                        <p class="text-lg font-semibold text-gray-900" x-text="formatNumber(detail.data.email_stats.sent)"></p>
+                                        <p class="text-[11px] text-gray-500">Sent</p>
+                                    </div>
+                                    <div class="bg-gray-50 rounded-lg p-3 text-center">
+                                        <p class="text-lg font-semibold text-gray-900" x-text="formatNumber(detail.data.email_stats.received)"></p>
+                                        <p class="text-[11px] text-gray-500">Received</p>
+                                    </div>
+                                </div>
+                                <template x-if="detail.data.email_stats.by_year && Object.keys(detail.data.email_stats.by_year).length > 0">
+                                    <div class="mt-3">
+                                        <label class="text-[11px] font-medium text-gray-500 uppercase tracking-wider">By Year</label>
+                                        <div class="mt-1 flex flex-wrap gap-2">
+                                            <template x-for="year in Object.keys(detail.data.email_stats.by_year).sort().reverse()" :key="year">
+                                                <div class="bg-gray-50 rounded px-2 py-1 text-center">
+                                                    <span class="text-xs font-medium text-gray-900" x-text="formatNumber(detail.data.email_stats.by_year[year])"></span>
+                                                    <span class="text-[10px] text-gray-500 ml-1" x-text="year"></span>
+                                                </div>
+                                            </template>
+                                        </div>
+                                    </div>
+                                </template>
+                            </div>
+                        </template>
+
+                        <!-- Email History -->
+                        <div class="px-6 py-4">
+                            <label class="text-xs font-medium text-gray-500 uppercase tracking-wider">Email History</label>
+                            <div class="mt-2 space-y-1">
+                                <template x-for="(email, idx) in (detail.emails || [])" :key="idx">
+                                    <div>
+                                        <div @click="email._expanded = !email._expanded" class="flex items-start py-2.5 px-3 rounded-lg hover:bg-gray-50 cursor-pointer">
+                                            <span class="mt-0.5 flex-shrink-0"
+                                                :class="email.direction === 'sent' ? 'text-blue-400' : 'text-green-400'">
+                                                <svg x-show="email.direction === 'sent'" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 10l7-7m0 0l7 7m-7-7v18"/></svg>
+                                                <svg x-show="email.direction !== 'sent'" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3"/></svg>
+                                            </span>
+                                            <div class="ml-2.5 min-w-0 flex-1">
+                                                <div class="text-sm text-gray-900 truncate" x-text="email.subject || '(no subject)'"></div>
+                                                <div class="text-xs text-gray-500 mt-0.5 truncate" x-text="email.summary || ''"></div>
+                                            </div>
+                                            <svg class="w-4 h-4 ml-2 text-gray-400 flex-shrink-0 transition-transform duration-150"
+                                                :class="email._expanded ? 'rotate-180' : ''"
+                                                fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                                            <span class="ml-2 text-[11px] text-gray-400 whitespace-nowrap flex-shrink-0" x-text="formatDate(email.date)"></span>
+                                        </div>
+                                        <div x-show="email._expanded"
+                                            x-transition:enter="transition ease-out duration-150"
+                                            x-transition:enter-start="opacity-0 -translate-y-1"
+                                            x-transition:enter-end="opacity-100 translate-y-0"
+                                            x-transition:leave="transition ease-in duration-100"
+                                            x-transition:leave-start="opacity-100"
+                                            x-transition:leave-end="opacity-0"
+                                            class="ml-9 mr-3 mb-2 border-t border-gray-100 pt-2">
+                                            <div class="text-xs text-gray-500 mb-2">
+                                                <span x-text="email.sender_name || email.sender_email"></span>
+                                                <span class="mx-1">&middot;</span>
+                                                <span x-text="formatDate(email.date)"></span>
+                                            </div>
+                                            <template x-if="email.body">
+                                                <div class="text-sm text-gray-700 whitespace-pre-wrap max-h-96 overflow-y-auto bg-gray-50 rounded-lg p-3 leading-relaxed" x-text="email.body"></div>
+                                            </template>
+                                            <template x-if="!email.body">
+                                                <p class="text-sm text-gray-400 italic">No email body available</p>
+                                            </template>
+                                        </div>
+                                    </div>
+                                </template>
+                                <template x-if="!detail.emails || detail.emails.length === 0">
+                                    <p class="text-sm text-gray-500 py-4 text-center">No emails loaded</p>
+                                </template>
+                                <template x-if="detail.emailsTotal > (detail.emails || []).length">
+                                    <button @click="loadMoreEmails()"
+                                        class="w-full py-2 text-sm text-primary-600 hover:text-primary-700 font-medium text-center hover:bg-primary-50 rounded-lg transition-colors"
+                                        :disabled="detail.emailsLoading">
+                                        <span x-show="!detail.emailsLoading">Load More</span>
+                                        <span x-show="detail.emailsLoading">Loading...</span>
+                                    </button>
+                                </template>
+                            </div>
+                        </div>
+                    </div>
+                </template>
+
+                <!-- ===== COMPANY DETAIL ===== -->
+                <template x-if="!detail.loading && detail.type === 'company' && detail.data">
+                    <div class="pb-8">
+                        <!-- Header -->
+                        <div class="px-6 pt-6 pb-4 border-b border-gray-100">
+                            <div class="pr-8">
+                                <h2 class="text-xl font-semibold text-gray-900" x-text="detail.data.company.name"></h2>
+                                <template x-if="detail.data.company.domain">
+                                    <a :href="'https://' + detail.data.company.domain" target="_blank" rel="noopener"
+                                        class="text-sm text-primary-600 hover:text-primary-700" x-text="detail.data.company.domain"></a>
+                                </template>
+                                <template x-if="detail.data.company.industry">
+                                    <span class="inline-flex items-center ml-2 px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700" x-text="detail.data.company.industry"></span>
+                                </template>
+                                <template x-if="detail.data.company.source_data?.enr">
+                                    <div class="mt-2 flex items-center gap-2">
+                                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-orange-100 text-orange-700"
+                                            x-text="'ENR 2024: #' + detail.data.company.source_data.enr.rank_2024"></span>
+                                        <template x-if="detail.data.company.source_data.enr.rank_2023">
+                                            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-orange-50 text-orange-600"
+                                                x-text="'2023: #' + detail.data.company.source_data.enr.rank_2023"></span>
+                                        </template>
+                                        <template x-if="detail.data.company.source_data.enr.revenue_2023_mil">
+                                            <span class="text-xs text-gray-500"
+                                                x-text="'$' + (detail.data.company.source_data.enr.revenue_2023_mil >= 1000 ? (detail.data.company.source_data.enr.revenue_2023_mil / 1000).toFixed(1) + 'B' : detail.data.company.source_data.enr.revenue_2023_mil.toFixed(0) + 'M') + ' revenue'"></span>
+                                        </template>
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+
+                        <!-- ENR Data -->
+                        <template x-if="detail.data.company.source_data?.enr">
+                            <div class="mx-6 my-4 rounded-xl bg-orange-50/50 border border-orange-100 p-5">
+                                <div class="flex items-center mb-3">
+                                    <span class="text-sm font-semibold text-orange-900">ENR Top 400 General Contractor</span>
+                                </div>
+                                <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-4">
+                                    <div>
+                                        <span class="text-[11px] text-orange-600 uppercase tracking-wider">2024 Rank</span>
+                                        <p class="text-lg font-bold text-gray-900" x-text="'#' + detail.data.company.source_data.enr.rank_2024"></p>
+                                    </div>
+                                    <div>
+                                        <span class="text-[11px] text-orange-600 uppercase tracking-wider">2023 Rank</span>
+                                        <p class="text-lg font-bold text-gray-900" x-text="detail.data.company.source_data.enr.rank_2023 ? '#' + detail.data.company.source_data.enr.rank_2023 : '-'"></p>
+                                    </div>
+                                    <div>
+                                        <span class="text-[11px] text-orange-600 uppercase tracking-wider">2023 Revenue</span>
+                                        <p class="text-lg font-bold text-gray-900"
+                                            x-text="detail.data.company.source_data.enr.revenue_2023_mil ? '$' + (detail.data.company.source_data.enr.revenue_2023_mil >= 1000 ? (detail.data.company.source_data.enr.revenue_2023_mil / 1000).toFixed(1) + 'B' : detail.data.company.source_data.enr.revenue_2023_mil.toFixed(0) + 'M') : '-'"></p>
+                                    </div>
+                                    <div>
+                                        <span class="text-[11px] text-orange-600 uppercase tracking-wider">New Contracts</span>
+                                        <p class="text-sm font-medium text-gray-900"
+                                            x-text="detail.data.company.source_data.enr.new_contracts_2023_mil ? '$' + (detail.data.company.source_data.enr.new_contracts_2023_mil >= 1000 ? (detail.data.company.source_data.enr.new_contracts_2023_mil / 1000).toFixed(1) + 'B' : detail.data.company.source_data.enr.new_contracts_2023_mil.toFixed(0) + 'M') : '-'"></p>
+                                    </div>
+                                    <div>
+                                        <span class="text-[11px] text-orange-600 uppercase tracking-wider">Int'l Revenue</span>
+                                        <p class="text-sm font-medium text-gray-900"
+                                            x-text="detail.data.company.source_data.enr.intl_revenue_mil ? '$' + detail.data.company.source_data.enr.intl_revenue_mil.toFixed(0) + 'M' : '-'"></p>
+                                    </div>
+                                    <div>
+                                        <span class="text-[11px] text-orange-600 uppercase tracking-wider">CM-at-Risk</span>
+                                        <p class="text-sm font-medium text-gray-900"
+                                            x-text="detail.data.company.source_data.enr.cm_at_risk_pct != null ? detail.data.company.source_data.enr.cm_at_risk_pct + '%' : '-'"></p>
+                                    </div>
+                                </div>
+                                <div>
+                                    <span class="text-[11px] text-orange-600 uppercase tracking-wider">Sector Breakdown</span>
+                                    <div class="mt-1 flex flex-wrap gap-1.5">
+                                        <template x-for="[sector, pct] in Object.entries(detail.data.company.source_data.enr.sectors || {}).filter(([k,v]) => v > 0).sort((a,b) => b[1] - a[1])" :key="sector">
+                                            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] bg-white border border-orange-200 text-orange-800">
+                                                <span x-text="sector.replaceAll('_', ' ')"></span>
+                                                <span class="ml-1 font-bold" x-text="pct + '%'"></span>
+                                            </span>
+                                        </template>
+                                    </div>
+                                </div>
+                                <template x-if="detail.data.company.source_data.enr.hq_city">
+                                    <div class="mt-3 text-xs text-gray-500">
+                                        HQ: <span x-text="detail.data.company.source_data.enr.hq_city + ', ' + detail.data.company.source_data.enr.hq_state"></span>
+                                    </div>
+                                </template>
+                            </div>
+                        </template>
+
+                        <!-- Company Info Grid -->
+                        <div class="px-6 py-4 border-b border-gray-100">
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label class="text-xs font-medium text-gray-500 uppercase tracking-wider">Type</label>
+                                    <p class="mt-1 text-sm text-gray-900" x-text="detail.data.company.company_type || '-'"></p>
+                                </div>
+                                <div>
+                                    <label class="text-xs font-medium text-gray-500 uppercase tracking-wider">Tier</label>
+                                    <p class="mt-1 text-sm text-gray-900" x-text="detail.data.company.account_tier || '-'"></p>
+                                </div>
+                                <div>
+                                    <label class="text-xs font-medium text-gray-500 uppercase tracking-wider">ARR</label>
+                                    <p class="mt-1 text-sm font-medium text-gray-900" x-text="detail.data.company.arr ? formatCurrency(detail.data.company.arr) : '-'"></p>
+                                </div>
+                                <div>
+                                    <label class="text-xs font-medium text-gray-500 uppercase tracking-wider">Revenue Segment</label>
+                                    <p class="mt-1 text-sm text-gray-900" x-text="detail.data.company.revenue_segment || '-'"></p>
+                                </div>
+                                <div>
+                                    <label class="text-xs font-medium text-gray-500 uppercase tracking-wider">Billing State</label>
+                                    <p class="mt-1 text-sm text-gray-900" x-text="detail.data.company.billing_state || '-'"></p>
+                                </div>
+                                <div>
+                                    <label class="text-xs font-medium text-gray-500 uppercase tracking-wider">Account Owner</label>
+                                    <p class="mt-1 text-sm text-gray-900" x-text="detail.data.company.account_owner || '-'"></p>
+                                </div>
+                                <div>
+                                    <label class="text-xs font-medium text-gray-500 uppercase tracking-wider">CSM</label>
+                                    <p class="mt-1 text-sm text-gray-900" x-text="detail.data.company.csm || '-'"></p>
+                                </div>
+                                <div>
+                                    <label class="text-xs font-medium text-gray-500 uppercase tracking-wider">Renewal Date</label>
+                                    <p class="mt-1 text-sm" :class="isRenewalSoon(detail.data.company.renewal_date) ? 'text-red-600 font-medium' : 'text-gray-900'"
+                                        x-text="detail.data.company.renewal_date ? formatDate(detail.data.company.renewal_date) : '-'"></p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Notes -->
+                        <div class="px-6 py-4 border-b border-gray-100">
+                            <label class="text-xs font-medium text-gray-500 uppercase tracking-wider">Notes</label>
+                            <textarea x-model="detail.data.company.notes"
+                                @input.debounce.1000ms="saveNotes('company')"
+                                placeholder="Add notes..."
+                                rows="3"
+                                class="mt-2 w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent resize-y"></textarea>
+                        </div>
+
+                        <!-- Email Summary -->
+                        <template x-if="detail.data.email_summary">
+                            <div class="px-6 py-4 border-b border-gray-100">
+                                <label class="text-xs font-medium text-gray-500 uppercase tracking-wider">Email Summary</label>
+                                <div class="mt-2 grid grid-cols-2 gap-3">
+                                    <div class="bg-gray-50 rounded-lg p-3">
+                                        <p class="text-lg font-semibold text-gray-900" x-text="formatNumber(detail.data.email_summary.total_emails)"></p>
+                                        <p class="text-[11px] text-gray-500">Total Emails</p>
+                                    </div>
+                                    <div class="bg-gray-50 rounded-lg p-3">
+                                        <p class="text-lg font-semibold text-gray-900" x-text="formatNumber(detail.data.email_summary.unique_contacts)"></p>
+                                        <p class="text-[11px] text-gray-500">Unique Contacts</p>
+                                    </div>
+                                </div>
+                                <div class="mt-2 text-xs text-gray-500">
+                                    <span x-text="detail.data.email_summary.first_email_date ? formatDate(detail.data.email_summary.first_email_date) : '-'"></span>
+                                    <span class="mx-1">&mdash;</span>
+                                    <span x-text="detail.data.email_summary.last_email_date ? formatDate(detail.data.email_summary.last_email_date) : '-'"></span>
+                                </div>
+                            </div>
+                        </template>
+
+                        <!-- Contacts at Company -->
+                        <div class="px-6 py-4">
+                            <label class="text-xs font-medium text-gray-500 uppercase tracking-wider">Contacts (<span x-text="(detail.data.contacts || []).length"></span>)</label>
+                            <div class="mt-2 space-y-1">
+                                <template x-for="c in (detail.data.contacts || [])" :key="c.id">
+                                    <button @click="openContactDetail(c.id)"
+                                        class="w-full flex items-center py-2.5 px-3 rounded-lg hover:bg-gray-50 transition-colors text-left">
+                                        <div class="w-7 h-7 rounded-full bg-primary-100 text-primary-600 flex items-center justify-center text-xs font-medium flex-shrink-0"
+                                            x-text="c.name ? c.name.charAt(0).toUpperCase() : '?'"></div>
+                                        <div class="ml-3 min-w-0 flex-1">
+                                            <div class="flex items-center">
+                                                <span class="text-sm font-medium text-gray-900 truncate" x-text="c.name"></span>
+                                                <template x-if="c.is_vip">
+                                                    <svg class="w-3 h-3 text-amber-400 ml-1 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/></svg>
+                                                </template>
+                                            </div>
+                                            <div class="text-xs text-gray-500 truncate">
+                                                <span x-text="c.title || c.email"></span>
+                                            </div>
+                                        </div>
+                                        <span class="ml-2 text-xs text-gray-400 tabular-nums" x-text="formatNumber(c.email_count)"></span>
+                                    </button>
+                                </template>
+                                <template x-if="!detail.data.contacts || detail.data.contacts.length === 0">
+                                    <p class="text-sm text-gray-500 py-4 text-center">No contacts</p>
+                                </template>
+                            </div>
+                        </div>
+                    </div>
+                </template>
+            </div>
+        </div>
+
+        <!-- Keyboard shortcut listener -->
+        <div x-on:keydown.meta.k.prevent="$refs?.globalSearch?.focus?.()" x-on:keydown.ctrl.k.prevent="$refs?.globalSearch?.focus?.()"></div>
+    </div>
+</body>
+</html>

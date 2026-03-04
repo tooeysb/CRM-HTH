@@ -1,0 +1,823 @@
+"""
+CRM API routes for contact and company management.
+"""
+
+from datetime import datetime
+from typing import Optional
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, ConfigDict
+from sqlalchemy import func, or_
+from sqlalchemy.orm import Session, selectinload
+
+from src.core.database import get_sync_db
+from src.models.company import Company
+from src.models.contact import Contact
+from src.models.email import Email
+from src.models.email_participant import EmailParticipant
+from src.models.relationship_profile import RelationshipProfile
+from src.models.user import User
+
+router = APIRouter()
+
+
+# ---------------------------------------------------------------------------
+# Pydantic response schemas
+# ---------------------------------------------------------------------------
+
+
+class ContactSummary(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    name: Optional[str] = None
+    email: str
+    phone: Optional[str] = None
+    title: Optional[str] = None
+    contact_type: Optional[str] = None
+    is_vip: bool = False
+    email_count: int = 0
+    tags: list[str] = []
+    relationship_context: Optional[str] = None
+    company_id: Optional[str] = None
+    company_name: Optional[str] = None
+    last_contact_at: Optional[str] = None
+    created_at: Optional[str] = None
+
+
+class CompanySummary(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    name: str
+    domain: Optional[str] = None
+    industry: Optional[str] = None
+    company_type: Optional[str] = None
+    account_tier: Optional[str] = None
+    arr: Optional[float] = None
+    revenue_segment: Optional[str] = None
+    billing_state: Optional[str] = None
+    contact_count: int = 0
+    created_at: Optional[str] = None
+
+
+class EmailSummary(BaseModel):
+    id: str
+    subject: Optional[str] = None
+    date: str
+    sender_name: Optional[str] = None
+    sender_email: str
+    summary: Optional[str] = None
+    has_attachments: bool = False
+    direction: Optional[str] = None
+
+
+class RelationshipProfileSummary(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    relationship_type: str
+    total_email_count: int = 0
+    sent_count: int = 0
+    received_count: int = 0
+    first_exchange_date: Optional[str] = None
+    last_exchange_date: Optional[str] = None
+    thread_count: int = 0
+    avg_response_time_hours: Optional[float] = None
+    profile_data: Optional[dict] = None
+    profiled_at: Optional[str] = None
+
+
+class ContactUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    title: Optional[str] = None
+    phone: Optional[str] = None
+    contact_type: Optional[str] = None
+    is_vip: Optional[bool] = None
+    tags: Optional[list[str]] = None
+    notes: Optional[str] = None
+    relationship_context: Optional[str] = None
+    company_id: Optional[str] = None
+    personal_email: Optional[str] = None
+
+
+class CompanyUpdateRequest(BaseModel):
+    notes: Optional[str] = None
+    company_type: Optional[str] = None
+    account_tier: Optional[str] = None
+    industry: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _get_user(db: Session) -> User:
+    user = db.query(User).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="No user found")
+    return user
+
+
+def _serialize_dt(dt: datetime | None) -> str | None:
+    return dt.isoformat() if dt else None
+
+
+def _serialize_contact(contact: Contact, company_name: str | None = None) -> dict:
+    return {
+        "id": str(contact.id),
+        "name": contact.name,
+        "email": contact.email,
+        "phone": contact.phone,
+        "title": contact.title,
+        "contact_type": contact.contact_type,
+        "is_vip": contact.is_vip,
+        "email_count": contact.email_count,
+        "tags": contact.tags or [],
+        "relationship_context": contact.relationship_context,
+        "company_id": str(contact.company_id) if contact.company_id else None,
+        "company_name": company_name,
+        "company": (
+            {"id": str(contact.company_id), "name": company_name}
+            if contact.company_id and company_name
+            else None
+        ),
+        "last_contact_at": _serialize_dt(contact.last_contact_at),
+        "notes": contact.notes,
+        "personal_email": contact.personal_email,
+        "account_sources": contact.account_sources or [],
+        "salesforce_id": contact.salesforce_id,
+        "address": contact.address,
+        "created_at": _serialize_dt(contact.created_at),
+        "updated_at": _serialize_dt(contact.updated_at),
+    }
+
+
+def _serialize_company(company: Company, contact_count: int = 0) -> dict:
+    return {
+        "id": str(company.id),
+        "name": company.name,
+        "domain": company.domain,
+        "aliases": company.aliases,
+        "industry": company.industry,
+        "company_type": company.company_type,
+        "billing_state": company.billing_state,
+        "arr": float(company.arr) if company.arr is not None else None,
+        "revenue_segment": company.revenue_segment,
+        "account_tier": company.account_tier,
+        "salesforce_id": company.salesforce_id,
+        "renewal_date": company.renewal_date.isoformat() if company.renewal_date else None,
+        "account_owner": company.account_owner,
+        "csm": company.csm,
+        "notes": company.notes,
+        "contact_count": contact_count,
+        "source_data": company.source_data,
+        "created_at": _serialize_dt(company.created_at),
+        "updated_at": _serialize_dt(company.updated_at),
+    }
+
+
+# ---------------------------------------------------------------------------
+# GET /dashboard
+# ---------------------------------------------------------------------------
+
+
+@router.get("/dashboard")
+def crm_dashboard(db: Session = Depends(get_sync_db)):
+    """CRM dashboard with aggregate statistics."""
+    user = _get_user(db)
+    uid = user.id
+
+    total_contacts = (
+        db.query(func.count(Contact.id)).filter(Contact.user_id == uid).scalar() or 0
+    )
+    total_companies = (
+        db.query(func.count(Company.id)).filter(Company.user_id == uid).scalar() or 0
+    )
+    total_emails = db.query(func.count(Email.id)).filter(Email.user_id == uid).scalar() or 0
+    vip_count = (
+        db.query(func.count(Contact.id))
+        .filter(Contact.user_id == uid, Contact.is_vip == True)
+        .scalar()
+        or 0
+    )
+
+    # Top 10 contacts by email_count
+    top_contacts_q = (
+        db.query(Contact)
+        .options(selectinload(Contact.company))
+        .filter(Contact.user_id == uid)
+        .order_by(Contact.email_count.desc())
+        .limit(10)
+        .all()
+    )
+    top_contacts = [
+        _serialize_contact(c, c.company.name if c.company else None) for c in top_contacts_q
+    ]
+
+    # Recent 20 emails
+    recent_emails_q = (
+        db.query(Email)
+        .filter(Email.user_id == uid)
+        .order_by(Email.date.desc())
+        .limit(20)
+        .all()
+    )
+    recent_emails = [
+        {
+            "id": str(e.id),
+            "subject": e.subject,
+            "date": _serialize_dt(e.date),
+            "sender_name": e.sender_name,
+            "sender_email": e.sender_email,
+            "summary": e.summary,
+            "has_attachments": e.has_attachments,
+            "body": e.body,
+        }
+        for e in recent_emails_q
+    ]
+
+    # Email volume by month (last 12 months)
+    volume_q = (
+        db.query(
+            func.date_trunc("month", Email.date).label("month"),
+            func.count(Email.id).label("count"),
+        )
+        .filter(Email.user_id == uid)
+        .group_by(func.date_trunc("month", Email.date))
+        .order_by(func.date_trunc("month", Email.date).desc())
+        .limit(12)
+        .all()
+    )
+    email_volume_by_month = [
+        {"month": row.month.isoformat() if row.month else None, "count": row.count}
+        for row in volume_q
+    ]
+
+    return {
+        "total_contacts": total_contacts,
+        "total_companies": total_companies,
+        "total_emails": total_emails,
+        "vip_count": vip_count,
+        "top_contacts": top_contacts,
+        "recent_emails": recent_emails,
+        "email_volume_by_month": email_volume_by_month,
+    }
+
+
+# ---------------------------------------------------------------------------
+# GET /contacts
+# ---------------------------------------------------------------------------
+
+
+@router.get("/contacts")
+def list_contacts(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    search: Optional[str] = Query(None),
+    sort_by: str = Query("email_count"),
+    sort_dir: str = Query("desc"),
+    is_vip: Optional[bool] = Query(None),
+    contact_type: Optional[str] = Query(None),
+    tags: Optional[str] = Query(None, description="Comma-separated tags"),
+    company_id: Optional[str] = Query(None),
+    db: Session = Depends(get_sync_db),
+):
+    """Paginated contact list with search and filtering."""
+    user = _get_user(db)
+    uid = user.id
+
+    query = (
+        db.query(Contact)
+        .options(selectinload(Contact.company))
+        .outerjoin(Company, Contact.company_id == Company.id)
+        .filter(Contact.user_id == uid)
+    )
+
+    # Filters
+    if search:
+        pattern = f"%{search}%"
+        query = query.filter(
+            or_(
+                Contact.name.ilike(pattern),
+                Contact.email.ilike(pattern),
+                Company.name.ilike(pattern),
+            )
+        )
+
+    if is_vip is not None:
+        query = query.filter(Contact.is_vip == is_vip)
+
+    if contact_type:
+        query = query.filter(Contact.contact_type == contact_type)
+
+    if tags:
+        tag_list = [t.strip() for t in tags.split(",") if t.strip()]
+        for tag in tag_list:
+            query = query.filter(Contact.tags.any(tag))
+
+    if company_id:
+        query = query.filter(Contact.company_id == company_id)
+
+    # Count before pagination
+    total = query.count()
+
+    # Sorting
+    sort_column = getattr(Contact, sort_by, Contact.email_count)
+    if sort_dir.lower() == "asc":
+        query = query.order_by(sort_column.asc())
+    else:
+        query = query.order_by(sort_column.desc())
+
+    # Pagination
+    offset = (page - 1) * page_size
+    contacts = query.offset(offset).limit(page_size).all()
+
+    total_pages = (total + page_size - 1) // page_size
+
+    return {
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": total_pages,
+        "items": [
+            _serialize_contact(c, c.company.name if c.company else None) for c in contacts
+        ],
+    }
+
+
+# ---------------------------------------------------------------------------
+# GET /contacts/{id}
+# ---------------------------------------------------------------------------
+
+
+@router.get("/contacts/{contact_id}")
+def get_contact(contact_id: str, db: Session = Depends(get_sync_db)):
+    """Get full contact detail with relationship profile and recent emails."""
+    user = _get_user(db)
+    uid = user.id
+
+    contact = (
+        db.query(Contact)
+        .options(selectinload(Contact.company))
+        .filter(Contact.id == contact_id, Contact.user_id == uid)
+        .first()
+    )
+    if not contact:
+        raise HTTPException(status_code=404, detail="Contact not found")
+
+    # Relationship profile
+    rel_profile = (
+        db.query(RelationshipProfile)
+        .filter(
+            RelationshipProfile.user_id == uid,
+            RelationshipProfile.contact_email == contact.email,
+        )
+        .first()
+    )
+
+    rel_data = None
+    if rel_profile:
+        rel_data = {
+            "id": str(rel_profile.id),
+            "relationship_type": rel_profile.relationship_type,
+            "total_email_count": rel_profile.total_email_count,
+            "sent_count": rel_profile.sent_count,
+            "received_count": rel_profile.received_count,
+            "first_exchange_date": _serialize_dt(rel_profile.first_exchange_date),
+            "last_exchange_date": _serialize_dt(rel_profile.last_exchange_date),
+            "thread_count": rel_profile.thread_count,
+            "avg_response_time_hours": rel_profile.avg_response_time_hours,
+            "profile_data": rel_profile.profile_data,
+            "profiled_at": _serialize_dt(rel_profile.profiled_at),
+        }
+
+    # Recent emails via EmailParticipant (last 10)
+    recent_participants = (
+        db.query(EmailParticipant)
+        .options(selectinload(EmailParticipant.email))
+        .filter(EmailParticipant.contact_id == contact.id)
+        .order_by(EmailParticipant.created_at.desc())
+        .limit(10)
+        .all()
+    )
+
+    recent_emails = []
+    for ep in recent_participants:
+        e = ep.email
+        if e is None:
+            continue
+        direction = "received" if ep.role == "sender" else "sent"
+        recent_emails.append(
+            {
+                "id": str(e.id),
+                "subject": e.subject,
+                "date": _serialize_dt(e.date),
+                "sender_name": e.sender_name,
+                "sender_email": e.sender_email,
+                "summary": e.summary,
+                "has_attachments": e.has_attachments,
+                "direction": direction,
+                "body": e.body,
+            }
+        )
+
+    # Sort recent emails by date descending
+    recent_emails.sort(key=lambda x: x["date"] or "", reverse=True)
+    recent_emails = recent_emails[:10]
+
+    # Email stats
+    total_emails_for_contact = (
+        db.query(func.count(EmailParticipant.id))
+        .filter(EmailParticipant.contact_id == contact.id)
+        .scalar()
+        or 0
+    )
+    sent_count = (
+        db.query(func.count(EmailParticipant.id))
+        .filter(EmailParticipant.contact_id == contact.id, EmailParticipant.role == "sender")
+        .scalar()
+        or 0
+    )
+    received_count = total_emails_for_contact - sent_count
+
+    # Email count by year
+    by_year_q = (
+        db.query(
+            func.extract("year", Email.date).label("year"),
+            func.count(Email.id).label("count"),
+        )
+        .join(EmailParticipant, EmailParticipant.email_id == Email.id)
+        .filter(EmailParticipant.contact_id == contact.id)
+        .group_by(func.extract("year", Email.date))
+        .order_by(func.extract("year", Email.date).desc())
+        .all()
+    )
+    by_year = {str(int(row.year)): row.count for row in by_year_q if row.year}
+
+    email_stats = {
+        "total": total_emails_for_contact,
+        "sent": sent_count,
+        "received": received_count,
+        "by_year": by_year,
+    }
+
+    contact_data = _serialize_contact(
+        contact, contact.company.name if contact.company else None
+    )
+
+    return {
+        "contact": contact_data,
+        "relationship_profile": rel_data,
+        "recent_emails": recent_emails,
+        "email_stats": email_stats,
+    }
+
+
+# ---------------------------------------------------------------------------
+# PATCH /contacts/{id}
+# ---------------------------------------------------------------------------
+
+
+@router.patch("/contacts/{contact_id}")
+def update_contact(
+    contact_id: str,
+    body: ContactUpdateRequest,
+    db: Session = Depends(get_sync_db),
+):
+    """Update editable contact fields."""
+    user = _get_user(db)
+    uid = user.id
+
+    contact = (
+        db.query(Contact)
+        .options(selectinload(Contact.company))
+        .filter(Contact.id == contact_id, Contact.user_id == uid)
+        .first()
+    )
+    if not contact:
+        raise HTTPException(status_code=404, detail="Contact not found")
+
+    update_data = body.model_dump(exclude_unset=True)
+
+    # Convert company_id string to UUID if provided
+    if "company_id" in update_data:
+        val = update_data["company_id"]
+        if val is not None:
+            # Verify company exists and belongs to user
+            company = (
+                db.query(Company).filter(Company.id == val, Company.user_id == uid).first()
+            )
+            if not company:
+                raise HTTPException(status_code=404, detail="Company not found")
+
+    for field, value in update_data.items():
+        setattr(contact, field, value)
+
+    db.commit()
+    db.refresh(contact)
+
+    return _serialize_contact(contact, contact.company.name if contact.company else None)
+
+
+# ---------------------------------------------------------------------------
+# GET /contacts/{id}/emails
+# ---------------------------------------------------------------------------
+
+
+@router.get("/contacts/{contact_id}/emails")
+def list_contact_emails(
+    contact_id: str,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_sync_db),
+):
+    """Paginated emails for a specific contact via EmailParticipant junction."""
+    user = _get_user(db)
+    uid = user.id
+
+    contact = (
+        db.query(Contact).filter(Contact.id == contact_id, Contact.user_id == uid).first()
+    )
+    if not contact:
+        raise HTTPException(status_code=404, detail="Contact not found")
+
+    base_query = (
+        db.query(EmailParticipant)
+        .options(selectinload(EmailParticipant.email))
+        .join(Email, EmailParticipant.email_id == Email.id)
+        .filter(EmailParticipant.contact_id == contact.id)
+    )
+
+    total = base_query.count()
+    offset = (page - 1) * page_size
+    total_pages = (total + page_size - 1) // page_size
+
+    participants = (
+        base_query.order_by(Email.date.desc()).offset(offset).limit(page_size).all()
+    )
+
+    items = []
+    for ep in participants:
+        e = ep.email
+        if e is None:
+            continue
+        direction = "received" if ep.role == "sender" else "sent"
+        items.append(
+            {
+                "id": str(e.id),
+                "subject": e.subject,
+                "date": _serialize_dt(e.date),
+                "sender_name": e.sender_name,
+                "sender_email": e.sender_email,
+                "summary": e.summary,
+                "has_attachments": e.has_attachments,
+                "direction": direction,
+                "body": e.body,
+            }
+        )
+
+    return {
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": total_pages,
+        "items": items,
+    }
+
+
+# ---------------------------------------------------------------------------
+# GET /companies
+# ---------------------------------------------------------------------------
+
+
+@router.get("/companies")
+def list_companies(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    search: Optional[str] = Query(None),
+    sort_by: str = Query("arr"),
+    sort_dir: str = Query("desc"),
+    company_type: Optional[str] = Query(None),
+    account_tier: Optional[str] = Query(None),
+    db: Session = Depends(get_sync_db),
+):
+    """Paginated company list with search and filtering."""
+    user = _get_user(db)
+    uid = user.id
+
+    # Subquery for contact_count
+    contact_count_sq = (
+        db.query(
+            Contact.company_id,
+            func.count(Contact.id).label("contact_count"),
+        )
+        .filter(Contact.user_id == uid, Contact.company_id.isnot(None))
+        .group_by(Contact.company_id)
+        .subquery()
+    )
+
+    query = (
+        db.query(Company, func.coalesce(contact_count_sq.c.contact_count, 0).label("contact_count"))
+        .outerjoin(contact_count_sq, Company.id == contact_count_sq.c.company_id)
+        .filter(Company.user_id == uid)
+    )
+
+    if search:
+        pattern = f"%{search}%"
+        query = query.filter(
+            or_(
+                Company.name.ilike(pattern),
+                Company.domain.ilike(pattern),
+            )
+        )
+
+    if company_type:
+        query = query.filter(Company.company_type == company_type)
+
+    if account_tier:
+        query = query.filter(Company.account_tier == account_tier)
+
+    total = query.count()
+
+    # Sorting - handle contact_count specially since it's a computed column
+    if sort_by == "contact_count":
+        sort_col = func.coalesce(contact_count_sq.c.contact_count, 0)
+    else:
+        sort_col = getattr(Company, sort_by, Company.arr)
+    if sort_dir.lower() == "asc":
+        query = query.order_by(sort_col.asc().nullslast())
+    else:
+        query = query.order_by(sort_col.desc().nullslast())
+
+    offset = (page - 1) * page_size
+    results = query.offset(offset).limit(page_size).all()
+
+    total_pages = (total + page_size - 1) // page_size
+
+    items = [_serialize_company(company, cc) for company, cc in results]
+
+    return {
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": total_pages,
+        "items": items,
+    }
+
+
+# ---------------------------------------------------------------------------
+# GET /companies/{id}
+# ---------------------------------------------------------------------------
+
+
+@router.get("/companies/{company_id}")
+def get_company(company_id: str, db: Session = Depends(get_sync_db)):
+    """Get full company detail with contacts and email summary."""
+    user = _get_user(db)
+    uid = user.id
+
+    company = (
+        db.query(Company)
+        .filter(Company.id == company_id, Company.user_id == uid)
+        .first()
+    )
+    if not company:
+        raise HTTPException(status_code=404, detail="Company not found")
+
+    # Contacts at this company
+    contacts = (
+        db.query(Contact)
+        .filter(Contact.user_id == uid, Contact.company_id == company.id)
+        .order_by(Contact.email_count.desc())
+        .all()
+    )
+
+    contacts_data = [_serialize_contact(c, company.name) for c in contacts]
+
+    # Email summary across all contacts at company
+    contact_ids = [c.id for c in contacts]
+    if contact_ids:
+        total_emails = (
+            db.query(func.count(func.distinct(EmailParticipant.email_id)))
+            .filter(EmailParticipant.contact_id.in_(contact_ids))
+            .scalar()
+            or 0
+        )
+
+        date_range = (
+            db.query(func.min(Email.date), func.max(Email.date))
+            .join(EmailParticipant, EmailParticipant.email_id == Email.id)
+            .filter(EmailParticipant.contact_id.in_(contact_ids))
+            .first()
+        )
+
+        first_email = _serialize_dt(date_range[0]) if date_range and date_range[0] else None
+        last_email = _serialize_dt(date_range[1]) if date_range and date_range[1] else None
+    else:
+        total_emails = 0
+        first_email = None
+        last_email = None
+
+    email_summary = {
+        "total_emails": total_emails,
+        "unique_contacts": len(contacts),
+        "first_email_date": first_email,
+        "last_email_date": last_email,
+    }
+
+    company_data = _serialize_company(company, len(contacts))
+
+    return {
+        "company": company_data,
+        "contacts": contacts_data,
+        "email_summary": email_summary,
+    }
+
+
+# ---------------------------------------------------------------------------
+# PATCH /companies/{id}
+# ---------------------------------------------------------------------------
+
+
+@router.patch("/companies/{company_id}")
+def update_company(
+    company_id: str,
+    body: CompanyUpdateRequest,
+    db: Session = Depends(get_sync_db),
+):
+    """Update editable company fields."""
+    user = _get_user(db)
+    uid = user.id
+
+    company = (
+        db.query(Company)
+        .filter(Company.id == company_id, Company.user_id == uid)
+        .first()
+    )
+    if not company:
+        raise HTTPException(status_code=404, detail="Company not found")
+
+    update_data = body.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(company, field, value)
+
+    db.commit()
+    db.refresh(company)
+
+    contact_count = (
+        db.query(func.count(Contact.id))
+        .filter(Contact.company_id == company.id, Contact.user_id == uid)
+        .scalar()
+        or 0
+    )
+
+    return _serialize_company(company, contact_count)
+
+
+# ---------------------------------------------------------------------------
+# GET /search
+# ---------------------------------------------------------------------------
+
+
+@router.get("/search")
+def global_search(
+    q: str = Query(..., min_length=1),
+    limit: int = Query(10, ge=1, le=50),
+    db: Session = Depends(get_sync_db),
+):
+    """Global search across contacts and companies."""
+    user = _get_user(db)
+    uid = user.id
+    pattern = f"%{q}%"
+
+    contacts = (
+        db.query(Contact)
+        .options(selectinload(Contact.company))
+        .filter(
+            Contact.user_id == uid,
+            or_(Contact.name.ilike(pattern), Contact.email.ilike(pattern)),
+        )
+        .order_by(Contact.email_count.desc())
+        .limit(limit)
+        .all()
+    )
+
+    companies = (
+        db.query(Company)
+        .filter(
+            Company.user_id == uid,
+            or_(Company.name.ilike(pattern), Company.domain.ilike(pattern)),
+        )
+        .limit(limit)
+        .all()
+    )
+
+    return {
+        "contacts": [
+            _serialize_contact(c, c.company.name if c.company else None) for c in contacts
+        ],
+        "companies": [_serialize_company(c, 0) for c in companies],
+    }
