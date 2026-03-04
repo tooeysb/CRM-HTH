@@ -7,7 +7,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import func, or_, text
+from sqlalchemy import case, func, or_, text
 from sqlalchemy.orm import Session, selectinload
 
 from src.api.middleware.auth import get_current_user
@@ -393,11 +393,43 @@ def list_contacts(
     offset = (page - 1) * page_size
     contacts = query.offset(offset).limit(page_size).all()
 
+    # Batch query: last email received from / sent to each contact on this page
+    email_dates: dict[str, dict] = {}
+    if contacts:
+        contact_ids = [c.id for c in contacts]
+        rows = (
+            db.query(
+                EmailParticipant.contact_id,
+                func.max(case((EmailParticipant.role == "sender", Email.date))).label(
+                    "last_received"
+                ),
+                func.max(case((EmailParticipant.role.in_(["to", "cc", "bcc"]), Email.date))).label(
+                    "last_sent"
+                ),
+            )
+            .join(Email, Email.id == EmailParticipant.email_id)
+            .filter(EmailParticipant.contact_id.in_(contact_ids))
+            .group_by(EmailParticipant.contact_id)
+            .all()
+        )
+        for row in rows:
+            email_dates[str(row.contact_id)] = {
+                "last_email_received": serialize_dt(row.last_received),
+                "last_email_sent": serialize_dt(row.last_sent),
+            }
+
+    def _build(c):
+        d = _serialize_contact(c, c.company.name if c.company else None)
+        dates = email_dates.get(str(c.id), {})
+        d["last_email_received"] = dates.get("last_email_received")
+        d["last_email_sent"] = dates.get("last_email_sent")
+        return d
+
     return _paginated_response(
         total,
         page,
         page_size,
-        [_serialize_contact(c, c.company.name if c.company else None) for c in contacts],
+        [_build(c) for c in contacts],
     )
 
 
@@ -507,6 +539,40 @@ def get_contact(
         "received": received_count,
         "by_year": by_year,
     }
+
+    # Auto-enrich title from email signature if missing
+    if not contact.title:
+        sig_row = db.execute(
+            text(
+                """
+                SELECT e.sender_email, e.sender_name, e.body
+                FROM emails e
+                JOIN email_participants ep ON ep.email_id = e.id
+                WHERE ep.contact_id = :cid
+                  AND ep.role = 'sender'
+                  AND e.body IS NOT NULL
+                  AND e.body != ''
+                ORDER BY e.date DESC
+                LIMIT 1
+                """
+            ),
+            {"cid": str(contact.id)},
+        ).fetchone()
+
+        if sig_row and sig_row.body:
+            company_name = contact.company.name if contact.company else ""
+            signatures = {
+                contact.email.lower(): (
+                    sig_row.sender_name or contact.name or "",
+                    sig_row.body,
+                )
+            }
+            enriched = _enrich_with_haiku(signatures, company_name)
+            info = enriched.get(contact.email.lower(), {})
+            if info.get("title"):
+                contact.title = info["title"]
+                db.commit()
+                _logger.info("Auto-enriched title for contact %s: %s", contact.id, contact.title)
 
     contact_data = _serialize_contact(contact, contact.company.name if contact.company else None)
 
