@@ -51,13 +51,8 @@ app.add_middleware(CorrelationIdMiddleware)
 
 @app.get("/")
 async def root():
-    """Health check endpoint."""
-    return {
-        "status": "healthy",
-        "service": "gmail-obsidian-integration",
-        "version": "1.0.0",
-        "environment": settings.app_env,
-    }
+    """Redirect root to CRM frontend."""
+    return RedirectResponse(url="/crm")
 
 
 @app.get("/health")
