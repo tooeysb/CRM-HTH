@@ -1241,160 +1241,349 @@
                             </div>
                         </div>
 
-                        <!-- ENR Data -->
-                        <template x-if="detail.data.company.source_data?.enr">
-                            <div class="mx-6 my-4 rounded-xl bg-orange-50/50 border border-orange-100 p-5">
-                                <div class="flex items-center mb-3">
-                                    <span class="text-sm font-semibold text-orange-900">ENR Top 400 General Contractor</span>
+                        <!-- Tab Bar -->
+                        <div class="px-6 pt-2 border-b border-gray-200 flex gap-0">
+                            <button @click="detail.companyTab = 'overview'"
+                                class="px-4 py-2.5 text-sm font-medium border-b-2 transition-colors"
+                                :class="detail.companyTab === 'overview' ? 'border-primary-500 text-primary-600' : 'border-transparent text-gray-500 hover:text-gray-700'">
+                                Overview
+                            </button>
+                            <button @click="detail.companyTab = 'news'"
+                                class="px-4 py-2.5 text-sm font-medium border-b-2 transition-colors flex items-center gap-1.5"
+                                :class="detail.companyTab === 'news' ? 'border-primary-500 text-primary-600' : 'border-transparent text-gray-500 hover:text-gray-700'">
+                                News Archive
+                                <template x-if="detail.newsTotal > 0">
+                                    <span class="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold"
+                                        :class="detail.companyTab === 'news' ? 'bg-primary-100 text-primary-700' : 'bg-gray-100 text-gray-600'"
+                                        x-text="detail.newsTotal"></span>
+                                </template>
+                            </button>
+                            <button @click="detail.companyTab = 'discovered'; loadDiscoveredContacts(detail.id)"
+                                class="px-4 py-2.5 text-sm font-medium border-b-2 transition-colors flex items-center gap-1.5"
+                                :class="detail.companyTab === 'discovered' ? 'border-primary-500 text-primary-600' : 'border-transparent text-gray-500 hover:text-gray-700'">
+                                Discovered People
+                                <template x-if="(detail.discoveredContacts || []).length > 0">
+                                    <span class="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold"
+                                        :class="detail.companyTab === 'discovered' ? 'bg-primary-100 text-primary-700' : 'bg-gray-100 text-gray-600'"
+                                        x-text="detail.discoveredContacts.length"></span>
+                                </template>
+                            </button>
+                        </div>
+
+                        <!-- ===== OVERVIEW TAB ===== -->
+                        <template x-if="detail.companyTab === 'overview'">
+                            <div>
+                                <!-- Today's News (highlighted) -->
+                                <div class="px-6 py-4 border-b border-gray-100">
+                                    <div class="flex items-center justify-between mb-3">
+                                        <div class="flex items-center gap-2">
+                                            <label class="text-xs font-medium text-gray-500 uppercase tracking-wider">Today's News</label>
+                                            <template x-if="(detail.recentNews || []).length > 0">
+                                                <span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-red-500 text-white text-[10px] font-bold" x-text="detail.recentNews.length"></span>
+                                            </template>
+                                        </div>
+                                        <template x-if="detail.newsLoading">
+                                            <span class="text-xs text-gray-400">Loading...</span>
+                                        </template>
+                                    </div>
+                                    <template x-if="(detail.recentNews || []).length > 0">
+                                        <div class="space-y-2.5">
+                                            <template x-for="item in detail.recentNews" :key="item.id">
+                                                <a :href="item.source_url" target="_blank" rel="noopener"
+                                                    class="block p-4 rounded-xl border-2 border-indigo-200 bg-indigo-50/50 hover:border-indigo-400 hover:bg-indigo-50 transition-all shadow-sm">
+                                                    <div class="flex items-start gap-3">
+                                                        <div class="flex-shrink-0 mt-0.5 w-2 h-2 rounded-full bg-red-500 animate-pulse"></div>
+                                                        <div class="flex-1 min-w-0">
+                                                            <p class="text-sm font-semibold text-gray-900 leading-snug" x-text="item.title"></p>
+                                                            <template x-if="item.summary">
+                                                                <p class="mt-1 text-xs text-gray-600 line-clamp-2" x-text="item.summary"></p>
+                                                            </template>
+                                                            <div class="flex items-center gap-2 mt-2 flex-wrap">
+                                                                <template x-if="item.analysis?.category">
+                                                                    <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold"
+                                                                        :class="outreachCategoryBadge(item.analysis.category)"
+                                                                        x-text="outreachCategoryLabel(item.analysis.category)"></span>
+                                                                </template>
+                                                                <template x-if="item.analysis?.relevance_score">
+                                                                    <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold"
+                                                                        :class="item.analysis.relevance_score >= 0.7 ? 'bg-green-100 text-green-700' : item.analysis.relevance_score >= 0.4 ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-500'"
+                                                                        x-text="Math.round(item.analysis.relevance_score * 100) + '% match'"></span>
+                                                                </template>
+                                                                <span class="text-[10px] text-gray-400" x-text="item.source_type.replace(/_/g, ' ')"></span>
+                                                                <template x-if="item.published_at">
+                                                                    <span class="text-[10px] text-gray-400" x-text="timeAgo(item.published_at)"></span>
+                                                                </template>
+                                                            </div>
+                                                        </div>
+                                                        <svg class="w-4 h-4 text-indigo-300 flex-shrink-0 mt-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+                                                    </div>
+                                                </a>
+                                            </template>
+                                        </div>
+                                    </template>
+                                    <template x-if="!detail.newsLoading && (detail.recentNews || []).length === 0">
+                                        <p class="text-sm text-gray-400 py-3 text-center">No new articles in the last 24 hours</p>
+                                    </template>
                                 </div>
-                                <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-4">
-                                    <div>
-                                        <span class="text-[11px] text-orange-600 uppercase tracking-wider">2024 Rank</span>
-                                        <p class="text-lg font-bold text-gray-900" x-text="'#' + detail.data.company.source_data.enr.rank_2024"></p>
+
+                                <!-- ENR Data -->
+                                <template x-if="detail.data.company.source_data?.enr">
+                                    <div class="mx-6 my-4 rounded-xl bg-orange-50/50 border border-orange-100 p-5">
+                                        <div class="flex items-center mb-3">
+                                            <span class="text-sm font-semibold text-orange-900">ENR Top 400 General Contractor</span>
+                                        </div>
+                                        <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-4">
+                                            <div>
+                                                <span class="text-[11px] text-orange-600 uppercase tracking-wider">2024 Rank</span>
+                                                <p class="text-lg font-bold text-gray-900" x-text="'#' + detail.data.company.source_data.enr.rank_2024"></p>
+                                            </div>
+                                            <div>
+                                                <span class="text-[11px] text-orange-600 uppercase tracking-wider">2023 Rank</span>
+                                                <p class="text-lg font-bold text-gray-900" x-text="detail.data.company.source_data.enr.rank_2023 ? '#' + detail.data.company.source_data.enr.rank_2023 : '-'"></p>
+                                            </div>
+                                            <div>
+                                                <span class="text-[11px] text-orange-600 uppercase tracking-wider">2023 Revenue</span>
+                                                <p class="text-lg font-bold text-gray-900"
+                                                    x-text="detail.data.company.source_data.enr.revenue_2023_mil ? '$' + (detail.data.company.source_data.enr.revenue_2023_mil >= 1000 ? (detail.data.company.source_data.enr.revenue_2023_mil / 1000).toFixed(1) + 'B' : detail.data.company.source_data.enr.revenue_2023_mil.toFixed(0) + 'M') : '-'"></p>
+                                            </div>
+                                            <div>
+                                                <span class="text-[11px] text-orange-600 uppercase tracking-wider">New Contracts</span>
+                                                <p class="text-sm font-medium text-gray-900"
+                                                    x-text="detail.data.company.source_data.enr.new_contracts_2023_mil ? '$' + (detail.data.company.source_data.enr.new_contracts_2023_mil >= 1000 ? (detail.data.company.source_data.enr.new_contracts_2023_mil / 1000).toFixed(1) + 'B' : detail.data.company.source_data.enr.new_contracts_2023_mil.toFixed(0) + 'M') : '-'"></p>
+                                            </div>
+                                            <div>
+                                                <span class="text-[11px] text-orange-600 uppercase tracking-wider">Int'l Revenue</span>
+                                                <p class="text-sm font-medium text-gray-900"
+                                                    x-text="detail.data.company.source_data.enr.intl_revenue_mil ? '$' + detail.data.company.source_data.enr.intl_revenue_mil.toFixed(0) + 'M' : '-'"></p>
+                                            </div>
+                                            <div>
+                                                <span class="text-[11px] text-orange-600 uppercase tracking-wider">CM-at-Risk</span>
+                                                <p class="text-sm font-medium text-gray-900"
+                                                    x-text="detail.data.company.source_data.enr.cm_at_risk_pct != null ? detail.data.company.source_data.enr.cm_at_risk_pct + '%' : '-'"></p>
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <span class="text-[11px] text-orange-600 uppercase tracking-wider">Sector Breakdown</span>
+                                            <div class="mt-1 flex flex-wrap gap-1.5">
+                                                <template x-for="[sector, pct] in Object.entries(detail.data.company.source_data.enr.sectors || {}).filter(([k,v]) => v > 0).sort((a,b) => b[1] - a[1])" :key="sector">
+                                                    <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] bg-white border border-orange-200 text-orange-800">
+                                                        <span x-text="sector.replaceAll('_', ' ')"></span>
+                                                        <span class="ml-1 font-bold" x-text="pct + '%'"></span>
+                                                    </span>
+                                                </template>
+                                            </div>
+                                        </div>
+                                        <template x-if="detail.data.company.source_data.enr.hq_city">
+                                            <div class="mt-3 text-xs text-gray-500">
+                                                HQ: <span x-text="detail.data.company.source_data.enr.hq_city + ', ' + detail.data.company.source_data.enr.hq_state"></span>
+                                            </div>
+                                        </template>
                                     </div>
-                                    <div>
-                                        <span class="text-[11px] text-orange-600 uppercase tracking-wider">2023 Rank</span>
-                                        <p class="text-lg font-bold text-gray-900" x-text="detail.data.company.source_data.enr.rank_2023 ? '#' + detail.data.company.source_data.enr.rank_2023 : '-'"></p>
-                                    </div>
-                                    <div>
-                                        <span class="text-[11px] text-orange-600 uppercase tracking-wider">2023 Revenue</span>
-                                        <p class="text-lg font-bold text-gray-900"
-                                            x-text="detail.data.company.source_data.enr.revenue_2023_mil ? '$' + (detail.data.company.source_data.enr.revenue_2023_mil >= 1000 ? (detail.data.company.source_data.enr.revenue_2023_mil / 1000).toFixed(1) + 'B' : detail.data.company.source_data.enr.revenue_2023_mil.toFixed(0) + 'M') : '-'"></p>
-                                    </div>
-                                    <div>
-                                        <span class="text-[11px] text-orange-600 uppercase tracking-wider">New Contracts</span>
-                                        <p class="text-sm font-medium text-gray-900"
-                                            x-text="detail.data.company.source_data.enr.new_contracts_2023_mil ? '$' + (detail.data.company.source_data.enr.new_contracts_2023_mil >= 1000 ? (detail.data.company.source_data.enr.new_contracts_2023_mil / 1000).toFixed(1) + 'B' : detail.data.company.source_data.enr.new_contracts_2023_mil.toFixed(0) + 'M') : '-'"></p>
-                                    </div>
-                                    <div>
-                                        <span class="text-[11px] text-orange-600 uppercase tracking-wider">Int'l Revenue</span>
-                                        <p class="text-sm font-medium text-gray-900"
-                                            x-text="detail.data.company.source_data.enr.intl_revenue_mil ? '$' + detail.data.company.source_data.enr.intl_revenue_mil.toFixed(0) + 'M' : '-'"></p>
-                                    </div>
-                                    <div>
-                                        <span class="text-[11px] text-orange-600 uppercase tracking-wider">CM-at-Risk</span>
-                                        <p class="text-sm font-medium text-gray-900"
-                                            x-text="detail.data.company.source_data.enr.cm_at_risk_pct != null ? detail.data.company.source_data.enr.cm_at_risk_pct + '%' : '-'"></p>
+                                </template>
+
+                                <!-- Company Info Grid -->
+                                <div class="px-6 py-4 border-b border-gray-100">
+                                    <div class="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label class="text-xs font-medium text-gray-500 uppercase tracking-wider">Type</label>
+                                            <p class="mt-1 text-sm text-gray-900" x-text="detail.data.company.company_type || '-'"></p>
+                                        </div>
+                                        <div>
+                                            <label class="text-xs font-medium text-gray-500 uppercase tracking-wider">Tier</label>
+                                            <p class="mt-1 text-sm text-gray-900" x-text="detail.data.company.account_tier || '-'"></p>
+                                        </div>
+                                        <div>
+                                            <label class="text-xs font-medium text-gray-500 uppercase tracking-wider">ARR</label>
+                                            <p class="mt-1 text-sm font-medium text-gray-900" x-text="detail.data.company.arr ? formatCurrency(detail.data.company.arr) : '-'"></p>
+                                        </div>
+                                        <div>
+                                            <label class="text-xs font-medium text-gray-500 uppercase tracking-wider">Revenue Segment</label>
+                                            <p class="mt-1 text-sm text-gray-900" x-text="detail.data.company.revenue_segment || '-'"></p>
+                                        </div>
+                                        <div>
+                                            <label class="text-xs font-medium text-gray-500 uppercase tracking-wider">Billing State</label>
+                                            <p class="mt-1 text-sm text-gray-900" x-text="detail.data.company.billing_state || '-'"></p>
+                                        </div>
+                                        <div>
+                                            <label class="text-xs font-medium text-gray-500 uppercase tracking-wider">Account Owner</label>
+                                            <p class="mt-1 text-sm text-gray-900" x-text="detail.data.company.account_owner || '-'"></p>
+                                        </div>
+                                        <div>
+                                            <label class="text-xs font-medium text-gray-500 uppercase tracking-wider">CSM</label>
+                                            <p class="mt-1 text-sm text-gray-900" x-text="detail.data.company.csm || '-'"></p>
+                                        </div>
+                                        <div>
+                                            <label class="text-xs font-medium text-gray-500 uppercase tracking-wider">Renewal Date</label>
+                                            <p class="mt-1 text-sm" :class="isRenewalSoon(detail.data.company.renewal_date) ? 'text-red-600 font-medium' : 'text-gray-900'"
+                                                x-text="detail.data.company.renewal_date ? formatDate(detail.data.company.renewal_date) : '-'"></p>
+                                        </div>
                                     </div>
                                 </div>
-                                <div>
-                                    <span class="text-[11px] text-orange-600 uppercase tracking-wider">Sector Breakdown</span>
-                                    <div class="mt-1 flex flex-wrap gap-1.5">
-                                        <template x-for="[sector, pct] in Object.entries(detail.data.company.source_data.enr.sectors || {}).filter(([k,v]) => v > 0).sort((a,b) => b[1] - a[1])" :key="sector">
-                                            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] bg-white border border-orange-200 text-orange-800">
-                                                <span x-text="sector.replaceAll('_', ' ')"></span>
-                                                <span class="ml-1 font-bold" x-text="pct + '%'"></span>
-                                            </span>
+
+                                <!-- Notes -->
+                                <div class="px-6 py-4 border-b border-gray-100">
+                                    <label class="text-xs font-medium text-gray-500 uppercase tracking-wider">Notes</label>
+                                    <textarea x-model="detail.data.company.notes"
+                                        @input.debounce.1000ms="saveNotes('company')"
+                                        placeholder="Add notes..."
+                                        rows="3"
+                                        class="mt-2 w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent resize-y"></textarea>
+                                </div>
+
+                                <!-- Email Summary -->
+                                <template x-if="detail.data.email_summary">
+                                    <div class="px-6 py-4 border-b border-gray-100">
+                                        <label class="text-xs font-medium text-gray-500 uppercase tracking-wider">Email Summary</label>
+                                        <div class="mt-2 grid grid-cols-2 gap-3">
+                                            <div class="bg-gray-50 rounded-lg p-3">
+                                                <p class="text-lg font-semibold text-gray-900" x-text="formatNumber(detail.data.email_summary.total_emails)"></p>
+                                                <p class="text-[11px] text-gray-500">Total Emails</p>
+                                            </div>
+                                            <div class="bg-gray-50 rounded-lg p-3">
+                                                <p class="text-lg font-semibold text-gray-900" x-text="formatNumber(detail.data.email_summary.unique_contacts)"></p>
+                                                <p class="text-[11px] text-gray-500">Unique Contacts</p>
+                                            </div>
+                                        </div>
+                                        <div class="mt-2 text-xs text-gray-500">
+                                            <span x-text="detail.data.email_summary.first_email_date ? formatDate(detail.data.email_summary.first_email_date) : '-'"></span>
+                                            <span class="mx-1">&mdash;</span>
+                                            <span x-text="detail.data.email_summary.last_email_date ? formatDate(detail.data.email_summary.last_email_date) : '-'"></span>
+                                        </div>
+                                    </div>
+                                </template>
+
+                                <!-- Contacts at Company -->
+                                <div class="px-6 py-4">
+                                    <label class="text-xs font-medium text-gray-500 uppercase tracking-wider">Contacts (<span x-text="(detail.data.contacts || []).length"></span>)</label>
+                                    <div class="mt-2 space-y-1">
+                                        <template x-for="c in (detail.data.contacts || [])" :key="c.id">
+                                            <button @click="openContactDetail(c.id)"
+                                                class="w-full flex items-center py-2.5 px-3 rounded-lg hover:bg-gray-50 transition-colors text-left">
+                                                <div class="w-7 h-7 rounded-full bg-primary-100 text-primary-600 flex items-center justify-center text-xs font-medium flex-shrink-0"
+                                                    x-text="c.name ? c.name.charAt(0).toUpperCase() : '?'"></div>
+                                                <div class="ml-3 min-w-0 flex-1">
+                                                    <div class="flex items-center">
+                                                        <span class="text-sm font-medium text-gray-900 truncate" x-text="c.name"></span>
+                                                        <template x-if="c.is_vip">
+                                                            <svg class="w-3 h-3 text-amber-400 ml-1 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/></svg>
+                                                        </template>
+                                                    </div>
+                                                    <div class="text-xs text-gray-500 truncate">
+                                                        <span x-text="c.title || c.email"></span>
+                                                    </div>
+                                                </div>
+                                                <span class="ml-2 text-xs text-gray-400 tabular-nums" x-text="formatNumber(c.email_count)"></span>
+                                            </button>
+                                        </template>
+                                        <template x-if="!detail.data.contacts || detail.data.contacts.length === 0">
+                                            <p class="text-sm text-gray-500 py-4 text-center">No contacts</p>
                                         </template>
                                     </div>
                                 </div>
-                                <template x-if="detail.data.company.source_data.enr.hq_city">
-                                    <div class="mt-3 text-xs text-gray-500">
-                                        HQ: <span x-text="detail.data.company.source_data.enr.hq_city + ', ' + detail.data.company.source_data.enr.hq_state"></span>
+                            </div>
+                        </template>
+
+                        <!-- ===== NEWS ARCHIVE TAB ===== -->
+                        <template x-if="detail.companyTab === 'news'">
+                            <div class="px-6 py-4">
+                                <template x-if="detail.newsLoading">
+                                    <p class="text-sm text-gray-400 py-8 text-center">Loading news...</p>
+                                </template>
+                                <template x-if="!detail.newsLoading && (detail.olderNews || []).length === 0">
+                                    <p class="text-sm text-gray-400 py-8 text-center">No archived news articles</p>
+                                </template>
+                                <template x-if="!detail.newsLoading && (detail.olderNews || []).length > 0">
+                                    <div class="space-y-2">
+                                        <template x-for="item in detail.olderNews" :key="item.id">
+                                            <a :href="item.source_url" target="_blank" rel="noopener"
+                                                class="block p-3 rounded-lg border border-gray-100 hover:border-primary-200 hover:bg-primary-50/30 transition-colors">
+                                                <div class="flex items-start gap-2">
+                                                    <div class="flex-1 min-w-0">
+                                                        <p class="text-sm font-medium text-gray-900 line-clamp-2" x-text="item.title"></p>
+                                                        <template x-if="item.summary">
+                                                            <p class="mt-1 text-xs text-gray-500 line-clamp-1" x-text="item.summary"></p>
+                                                        </template>
+                                                        <div class="flex items-center gap-2 mt-1.5 flex-wrap">
+                                                            <template x-if="item.analysis?.category">
+                                                                <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium"
+                                                                    :class="outreachCategoryBadge(item.analysis.category)"
+                                                                    x-text="outreachCategoryLabel(item.analysis.category)"></span>
+                                                            </template>
+                                                            <template x-if="item.analysis?.relevance_score">
+                                                                <span class="text-[10px] font-medium"
+                                                                    :class="item.analysis.relevance_score >= 0.7 ? 'text-green-600' : item.analysis.relevance_score >= 0.4 ? 'text-amber-600' : 'text-gray-400'"
+                                                                    x-text="Math.round(item.analysis.relevance_score * 100) + '% relevant'"></span>
+                                                            </template>
+                                                            <span class="text-[10px] text-gray-400" x-text="item.source_type.replace(/_/g, ' ')"></span>
+                                                            <template x-if="item.published_at || item.created_at">
+                                                                <span class="text-[10px] text-gray-400" x-text="formatDate(item.published_at || item.created_at)"></span>
+                                                            </template>
+                                                        </div>
+                                                    </div>
+                                                    <svg class="w-4 h-4 text-gray-300 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+                                                </div>
+                                            </a>
+                                        </template>
                                     </div>
                                 </template>
                             </div>
                         </template>
 
-                        <!-- Company Info Grid -->
-                        <div class="px-6 py-4 border-b border-gray-100">
-                            <div class="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label class="text-xs font-medium text-gray-500 uppercase tracking-wider">Type</label>
-                                    <p class="mt-1 text-sm text-gray-900" x-text="detail.data.company.company_type || '-'"></p>
-                                </div>
-                                <div>
-                                    <label class="text-xs font-medium text-gray-500 uppercase tracking-wider">Tier</label>
-                                    <p class="mt-1 text-sm text-gray-900" x-text="detail.data.company.account_tier || '-'"></p>
-                                </div>
-                                <div>
-                                    <label class="text-xs font-medium text-gray-500 uppercase tracking-wider">ARR</label>
-                                    <p class="mt-1 text-sm font-medium text-gray-900" x-text="detail.data.company.arr ? formatCurrency(detail.data.company.arr) : '-'"></p>
-                                </div>
-                                <div>
-                                    <label class="text-xs font-medium text-gray-500 uppercase tracking-wider">Revenue Segment</label>
-                                    <p class="mt-1 text-sm text-gray-900" x-text="detail.data.company.revenue_segment || '-'"></p>
-                                </div>
-                                <div>
-                                    <label class="text-xs font-medium text-gray-500 uppercase tracking-wider">Billing State</label>
-                                    <p class="mt-1 text-sm text-gray-900" x-text="detail.data.company.billing_state || '-'"></p>
-                                </div>
-                                <div>
-                                    <label class="text-xs font-medium text-gray-500 uppercase tracking-wider">Account Owner</label>
-                                    <p class="mt-1 text-sm text-gray-900" x-text="detail.data.company.account_owner || '-'"></p>
-                                </div>
-                                <div>
-                                    <label class="text-xs font-medium text-gray-500 uppercase tracking-wider">CSM</label>
-                                    <p class="mt-1 text-sm text-gray-900" x-text="detail.data.company.csm || '-'"></p>
-                                </div>
-                                <div>
-                                    <label class="text-xs font-medium text-gray-500 uppercase tracking-wider">Renewal Date</label>
-                                    <p class="mt-1 text-sm" :class="isRenewalSoon(detail.data.company.renewal_date) ? 'text-red-600 font-medium' : 'text-gray-900'"
-                                        x-text="detail.data.company.renewal_date ? formatDate(detail.data.company.renewal_date) : '-'"></p>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Notes -->
-                        <div class="px-6 py-4 border-b border-gray-100">
-                            <label class="text-xs font-medium text-gray-500 uppercase tracking-wider">Notes</label>
-                            <textarea x-model="detail.data.company.notes"
-                                @input.debounce.1000ms="saveNotes('company')"
-                                placeholder="Add notes..."
-                                rows="3"
-                                class="mt-2 w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent resize-y"></textarea>
-                        </div>
-
-                        <!-- Email Summary -->
-                        <template x-if="detail.data.email_summary">
-                            <div class="px-6 py-4 border-b border-gray-100">
-                                <label class="text-xs font-medium text-gray-500 uppercase tracking-wider">Email Summary</label>
-                                <div class="mt-2 grid grid-cols-2 gap-3">
-                                    <div class="bg-gray-50 rounded-lg p-3">
-                                        <p class="text-lg font-semibold text-gray-900" x-text="formatNumber(detail.data.email_summary.total_emails)"></p>
-                                        <p class="text-[11px] text-gray-500">Total Emails</p>
+                        <!-- ===== DISCOVERED PEOPLE TAB ===== -->
+                        <template x-if="detail.companyTab === 'discovered'">
+                            <div class="px-6 py-4">
+                                <template x-if="detail.discoveredLoading">
+                                    <p class="text-sm text-gray-400 py-8 text-center">Searching email history...</p>
+                                </template>
+                                <template x-if="!detail.discoveredLoading && (detail.discoveredContacts || []).length === 0">
+                                    <div class="text-center py-8">
+                                        <p class="text-sm text-gray-500">No additional people found</p>
+                                        <p class="text-xs text-gray-400 mt-1">Everyone at this domain is already in your CRM</p>
                                     </div>
-                                    <div class="bg-gray-50 rounded-lg p-3">
-                                        <p class="text-lg font-semibold text-gray-900" x-text="formatNumber(detail.data.email_summary.unique_contacts)"></p>
-                                        <p class="text-[11px] text-gray-500">Unique Contacts</p>
-                                    </div>
-                                </div>
-                                <div class="mt-2 text-xs text-gray-500">
-                                    <span x-text="detail.data.email_summary.first_email_date ? formatDate(detail.data.email_summary.first_email_date) : '-'"></span>
-                                    <span class="mx-1">&mdash;</span>
-                                    <span x-text="detail.data.email_summary.last_email_date ? formatDate(detail.data.email_summary.last_email_date) : '-'"></span>
-                                </div>
-                            </div>
-                        </template>
-
-                        <!-- Contacts at Company -->
-                        <div class="px-6 py-4">
-                            <label class="text-xs font-medium text-gray-500 uppercase tracking-wider">Contacts (<span x-text="(detail.data.contacts || []).length"></span>)</label>
-                            <div class="mt-2 space-y-1">
-                                <template x-for="c in (detail.data.contacts || [])" :key="c.id">
-                                    <button @click="openContactDetail(c.id)"
-                                        class="w-full flex items-center py-2.5 px-3 rounded-lg hover:bg-gray-50 transition-colors text-left">
-                                        <div class="w-7 h-7 rounded-full bg-primary-100 text-primary-600 flex items-center justify-center text-xs font-medium flex-shrink-0"
-                                            x-text="c.name ? c.name.charAt(0).toUpperCase() : '?'"></div>
-                                        <div class="ml-3 min-w-0 flex-1">
-                                            <div class="flex items-center">
-                                                <span class="text-sm font-medium text-gray-900 truncate" x-text="c.name"></span>
-                                                <template x-if="c.is_vip">
-                                                    <svg class="w-3 h-3 text-amber-400 ml-1 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/></svg>
-                                                </template>
-                                            </div>
-                                            <div class="text-xs text-gray-500 truncate">
-                                                <span x-text="c.title || c.email"></span>
-                                            </div>
+                                </template>
+                                <template x-if="!detail.discoveredLoading && (detail.discoveredContacts || []).length > 0">
+                                    <div>
+                                        <p class="text-xs text-gray-500 mb-3">
+                                            Found <span class="font-medium" x-text="detail.discoveredContacts.length"></span>
+                                            people at <span class="font-medium" x-text="'@' + detail.discoveredDomain"></span> in your email history
+                                        </p>
+                                        <div class="space-y-1">
+                                            <template x-for="(person, idx) in detail.discoveredContacts" :key="person.email">
+                                                <div class="flex items-center py-2.5 px-3 rounded-lg hover:bg-gray-50 transition-colors group">
+                                                    <div class="w-7 h-7 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center text-xs font-medium flex-shrink-0"
+                                                        x-text="person.name ? person.name.charAt(0).toUpperCase() : person.email.charAt(0).toUpperCase()"></div>
+                                                    <div class="ml-3 min-w-0 flex-1">
+                                                        <div class="text-sm font-medium text-gray-900 truncate" x-text="person.name || person.email"></div>
+                                                        <div class="text-xs text-gray-500 truncate" x-text="person.name ? person.email : ''"></div>
+                                                        <div class="flex items-center gap-2 mt-0.5">
+                                                            <span class="text-[10px] text-gray-400" x-text="person.email_count + ' emails'"></span>
+                                                            <template x-if="person.first_email">
+                                                                <span class="text-[10px] text-gray-400" x-text="formatDate(person.first_email) + ' – ' + formatDate(person.last_email)"></span>
+                                                            </template>
+                                                        </div>
+                                                    </div>
+                                                    <template x-if="!person.added">
+                                                        <button @click="addDiscoveredContact(detail.id, person, idx)"
+                                                            class="ml-2 px-2.5 py-1 text-xs font-medium text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-md transition-colors opacity-0 group-hover:opacity-100 flex-shrink-0"
+                                                            :disabled="person.adding">
+                                                            <span x-show="!person.adding">Add to CRM</span>
+                                                            <span x-show="person.adding">Adding...</span>
+                                                        </button>
+                                                    </template>
+                                                    <template x-if="person.added">
+                                                        <span class="ml-2 px-2.5 py-1 text-xs font-medium text-emerald-600 flex-shrink-0 flex items-center gap-1">
+                                                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                                                            Added
+                                                        </span>
+                                                    </template>
+                                                </div>
+                                            </template>
                                         </div>
-                                        <span class="ml-2 text-xs text-gray-400 tabular-nums" x-text="formatNumber(c.email_count)"></span>
-                                    </button>
-                                </template>
-                                <template x-if="!detail.data.contacts || detail.data.contacts.length === 0">
-                                    <p class="text-sm text-gray-500 py-4 text-center">No contacts</p>
+                                    </div>
                                 </template>
                             </div>
-                        </div>
+                        </template>
+
                     </div>
                 </template>
             </div>

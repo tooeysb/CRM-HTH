@@ -78,13 +78,15 @@ function crmApp() {
 
         // ==================== LIFECYCLE ====================
         init() {
-            this.loadDashboard();
+            window.addEventListener('hashchange', () => this._restoreFromHash());
+            this._restoreFromHash();
         },
 
         // ==================== NAVIGATION ====================
         navigate(view) {
             this.currentView = view;
             this.closeDetail();
+            window.location.hash = view;
             if (view === 'dashboard' && !this.dashboard.data) {
                 this.loadDashboard();
             } else if (view === 'contacts' && this.contacts.items.length === 0) {
@@ -93,6 +95,29 @@ function crmApp() {
                 this.loadCompanies();
             } else if (view === 'outreach') {
                 this.loadOutreach();
+            }
+        },
+
+        _restoreFromHash() {
+            const hash = window.location.hash.replace('#', '');
+            if (!hash) {
+                this.loadDashboard();
+                return;
+            }
+            const [view, id] = hash.split('/');
+            if (['dashboard', 'contacts', 'companies', 'outreach'].includes(view)) {
+                this.currentView = view;
+                if (view === 'dashboard') this.loadDashboard();
+                else if (view === 'contacts') this.loadContacts();
+                else if (view === 'companies') this.loadCompanies();
+                else if (view === 'outreach') this.loadOutreach();
+
+                if (id) {
+                    if (view === 'companies') this.openCompanyDetail(id);
+                    else if (view === 'contacts') this.openContactDetail(id);
+                }
+            } else {
+                this.loadDashboard();
             }
         },
 
@@ -242,6 +267,7 @@ function crmApp() {
             this.emailsTotal = 0;
             this.editing = { field: null, value: '' };
             this.newTag = '';
+            window.location.hash = 'contacts/' + id;
 
             const data = await this.apiFetch('contacts/' + id);
             if (data) {
@@ -255,19 +281,71 @@ function crmApp() {
         },
 
         async openCompanyDetail(id) {
-            this.detail = { show: true, type: 'company', id, loading: true, data: null };
+            this.detail = { show: true, type: 'company', id, loading: true, data: null, recentNews: [], olderNews: [], newsLoading: false, newsTotal: 0, companyTab: 'overview', discoveredContacts: [], discoveredLoading: false, discoveredDomain: '' };
             this.editing = { field: null, value: '' };
+            window.location.hash = 'companies/' + id;
 
             const data = await this.apiFetch('companies/' + id);
             if (data) {
                 this.detail.data = data;
+                this.loadCompanyNews(id);
             }
             this.detail.loading = false;
+        },
+
+        async loadCompanyNews(companyId) {
+            this.detail.newsLoading = true;
+            const data = await this.apiFetch('outreach/news?company_id=' + companyId + '&page_size=50&sort_by=published_at&sort_dir=desc');
+            if (data) {
+                const items = (data.items || []).map(i => {
+                    // Strip HTML tags from summary
+                    if (i.summary) i.summary = i.summary.replace(/<[^>]*>/g, '').trim();
+                    return i;
+                });
+                const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+                this.detail.recentNews = items.filter(i => {
+                    const d = i.published_at || i.created_at;
+                    return d && new Date(d).getTime() >= cutoff;
+                });
+                this.detail.olderNews = items.filter(i => {
+                    const d = i.published_at || i.created_at;
+                    return !d || new Date(d).getTime() < cutoff;
+                });
+                this.detail.newsTotal = data.total || 0;
+            }
+            this.detail.newsLoading = false;
+        },
+
+        async loadDiscoveredContacts(companyId) {
+            if (this.detail.discoveredContacts.length > 0) return; // already loaded
+            this.detail.discoveredLoading = true;
+            const data = await this.apiFetch('companies/' + companyId + '/discovered-contacts');
+            if (data) {
+                this.detail.discoveredContacts = (data.discovered || []).map(p => ({ ...p, adding: false, added: false }));
+                this.detail.discoveredDomain = data.domain || '';
+            }
+            this.detail.discoveredLoading = false;
+        },
+
+        async addDiscoveredContact(companyId, person, idx) {
+            this.detail.discoveredContacts[idx].adding = true;
+            const result = await this.apiFetch('companies/' + companyId + '/contacts', {
+                method: 'POST',
+                body: JSON.stringify({ email: person.email, name: person.name }),
+            });
+            if (result) {
+                this.detail.discoveredContacts[idx].added = true;
+                // Refresh the company detail to show updated contact list
+                const data = await this.apiFetch('companies/' + companyId);
+                if (data) this.detail.data = data;
+            }
+            this.detail.discoveredContacts[idx].adding = false;
         },
 
         closeDetail() {
             this.detail.show = false;
             this.editing = { field: null, value: '' };
+            window.location.hash = this.currentView;
         },
 
         // ==================== CONTACT EMAILS ====================

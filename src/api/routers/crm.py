@@ -2,13 +2,13 @@
 CRM API routes for contact and company management.
 """
 
-from datetime import datetime
+import re
+import uuid
 from typing import Optional
-from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import func, or_
+from sqlalchemy import func, or_, text
 from sqlalchemy.orm import Session, selectinload
 
 from src.api.middleware.auth import get_current_user
@@ -24,15 +24,33 @@ from src.models.user import User
 router = APIRouter()
 
 # Allowed sort columns to prevent attribute enumeration via getattr
-CONTACT_SORTABLE_COLUMNS: frozenset[str] = frozenset({
-    "email_count", "name", "email", "last_contact_at", "created_at",
-    "updated_at", "title", "contact_type", "is_vip",
-})
+CONTACT_SORTABLE_COLUMNS: frozenset[str] = frozenset(
+    {
+        "email_count",
+        "name",
+        "email",
+        "last_contact_at",
+        "created_at",
+        "updated_at",
+        "title",
+        "contact_type",
+        "is_vip",
+    }
+)
 
-COMPANY_SORTABLE_COLUMNS: frozenset[str] = frozenset({
-    "arr", "name", "domain", "created_at", "updated_at", "account_tier",
-    "industry", "company_type", "revenue_segment",
-})
+COMPANY_SORTABLE_COLUMNS: frozenset[str] = frozenset(
+    {
+        "arr",
+        "name",
+        "domain",
+        "created_at",
+        "updated_at",
+        "account_tier",
+        "industry",
+        "company_type",
+        "revenue_segment",
+    }
+)
 
 
 # ---------------------------------------------------------------------------
@@ -156,9 +174,7 @@ def _serialize_email_dict(email: Email, direction: str | None = None) -> dict:
     return result
 
 
-def _paginated_response(
-    total: int, page: int, page_size: int, items: list
-) -> dict:
+def _paginated_response(total: int, page: int, page_size: int, items: list) -> dict:
     """Build a standard paginated response envelope."""
     return {
         "total": total,
@@ -229,18 +245,12 @@ def _serialize_company(company: Company, contact_count: int = 0) -> dict:
 
 
 @router.get("/dashboard")
-def crm_dashboard(
-    user: User = Depends(get_current_user), db: Session = Depends(get_sync_db)
-):
+def crm_dashboard(user: User = Depends(get_current_user), db: Session = Depends(get_sync_db)):
     """CRM dashboard with aggregate statistics."""
     uid = user.id
 
-    total_contacts = (
-        db.query(func.count(Contact.id)).filter(Contact.user_id == uid).scalar() or 0
-    )
-    total_companies = (
-        db.query(func.count(Company.id)).filter(Company.user_id == uid).scalar() or 0
-    )
+    total_contacts = db.query(func.count(Contact.id)).filter(Contact.user_id == uid).scalar() or 0
+    total_companies = db.query(func.count(Company.id)).filter(Company.user_id == uid).scalar() or 0
     total_emails = db.query(func.count(Email.id)).filter(Email.user_id == uid).scalar() or 0
     vip_count = (
         db.query(func.count(Contact.id))
@@ -264,11 +274,7 @@ def crm_dashboard(
 
     # Recent 20 emails
     recent_emails_q = (
-        db.query(Email)
-        .filter(Email.user_id == uid)
-        .order_by(Email.date.desc())
-        .limit(20)
-        .all()
+        db.query(Email).filter(Email.user_id == uid).order_by(Email.date.desc()).limit(20).all()
     )
     recent_emails = [_serialize_email_dict(e) for e in recent_emails_q]
 
@@ -371,7 +377,9 @@ def list_contacts(
     contacts = query.offset(offset).limit(page_size).all()
 
     return _paginated_response(
-        total, page, page_size,
+        total,
+        page,
+        page_size,
         [_serialize_contact(c, c.company.name if c.company else None) for c in contacts],
     )
 
@@ -483,9 +491,7 @@ def get_contact(
         "by_year": by_year,
     }
 
-    contact_data = _serialize_contact(
-        contact, contact.company.name if contact.company else None
-    )
+    contact_data = _serialize_contact(contact, contact.company.name if contact.company else None)
 
     return {
         "contact": contact_data,
@@ -526,9 +532,7 @@ def update_contact(
         val = update_data["company_id"]
         if val is not None:
             # Verify company exists and belongs to user
-            company = (
-                db.query(Company).filter(Company.id == val, Company.user_id == uid).first()
-            )
+            company = db.query(Company).filter(Company.id == val, Company.user_id == uid).first()
             if not company:
                 raise HTTPException(status_code=404, detail="Company not found")
 
@@ -560,9 +564,7 @@ def list_contact_emails(
     """Paginated emails for a specific contact via EmailParticipant junction."""
     uid = user.id
 
-    contact = (
-        db.query(Contact).filter(Contact.id == contact_id, Contact.user_id == uid).first()
-    )
+    contact = db.query(Contact).filter(Contact.id == contact_id, Contact.user_id == uid).first()
     if not contact:
         raise HTTPException(status_code=404, detail="Contact not found")
 
@@ -576,9 +578,7 @@ def list_contact_emails(
     total = base_query.count()
     offset = (page - 1) * page_size
 
-    participants = (
-        base_query.order_by(Email.date.desc()).offset(offset).limit(page_size).all()
-    )
+    participants = base_query.order_by(Email.date.desc()).offset(offset).limit(page_size).all()
 
     items = []
     for ep in participants:
@@ -679,11 +679,7 @@ def get_company(
     """Get full company detail with contacts and email summary."""
     uid = user.id
 
-    company = (
-        db.query(Company)
-        .filter(Company.id == company_id, Company.user_id == uid)
-        .first()
-    )
+    company = db.query(Company).filter(Company.id == company_id, Company.user_id == uid).first()
     if not company:
         raise HTTPException(status_code=404, detail="Company not found")
 
@@ -738,6 +734,246 @@ def get_company(
 
 
 # ---------------------------------------------------------------------------
+# GET /companies/{id}/discovered-contacts
+# ---------------------------------------------------------------------------
+
+
+@router.get("/companies/{company_id}/discovered-contacts")
+def get_discovered_contacts(
+    company_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_sync_db),
+):
+    """
+    Find email addresses matching a company's domain from all emails,
+    excluding people already in the CRM as contacts.
+    Searches sender_email and recipient_emails fields.
+    """
+    uid = user.id
+
+    company = db.query(Company).filter(Company.id == company_id, Company.user_id == uid).first()
+    if not company or not company.domain:
+        return {"discovered": [], "domain": None}
+
+    domain = company.domain.lower().strip()
+
+    # Get existing contact emails at this company to exclude
+    existing_emails = set()
+    existing_contacts = (
+        db.query(Contact.email)
+        .filter(Contact.user_id == uid, Contact.company_id == company.id)
+        .all()
+    )
+    for (email,) in existing_contacts:
+        existing_emails.add(email.lower())
+
+    # Also get all contacts with this domain (might be assigned to different company)
+    all_domain_contacts = (
+        db.query(Contact.email)
+        .filter(Contact.user_id == uid, Contact.email.ilike(f"%@{domain}"))
+        .all()
+    )
+    for (email,) in all_domain_contacts:
+        existing_emails.add(email.lower())
+
+    # Search sender_email for this domain
+    sender_rows = db.execute(
+        text(
+            """
+                SELECT sender_email, sender_name,
+                       COUNT(*) as email_count,
+                       MAX(date) as last_email,
+                       MIN(date) as first_email
+                FROM emails
+                WHERE user_id = :uid
+                  AND LOWER(sender_email) LIKE :domain_pattern
+                GROUP BY sender_email, sender_name
+                ORDER BY COUNT(*) DESC
+            """
+        ),
+        {"uid": str(uid), "domain_pattern": f"%@{domain}"},
+    ).fetchall()
+
+    # Search recipient_emails for this domain (comma-separated field)
+    recipient_rows = db.execute(
+        text(
+            """
+                SELECT recipient_emails, COUNT(*) as email_count
+                FROM emails
+                WHERE user_id = :uid
+                  AND LOWER(recipient_emails) LIKE :domain_pattern
+                GROUP BY recipient_emails
+            """
+        ),
+        {"uid": str(uid), "domain_pattern": f"%@{domain}%"},
+    ).fetchall()
+
+    # Aggregate discovered people
+    people: dict[str, dict] = {}  # email -> {name, email_count, last_email, first_email}
+
+    # From sender_email
+    for row in sender_rows:
+        email = row.sender_email.lower().strip()
+        if email in existing_emails:
+            continue
+        if email not in people:
+            people[email] = {
+                "email": row.sender_email.strip(),
+                "name": row.sender_name,
+                "email_count": 0,
+                "last_email": None,
+                "first_email": None,
+            }
+        people[email]["email_count"] += row.email_count
+        if row.last_email:
+            cur = people[email]["last_email"]
+            if not cur or row.last_email > cur:
+                people[email]["last_email"] = row.last_email
+        if row.first_email:
+            cur = people[email]["first_email"]
+            if not cur or row.first_email < cur:
+                people[email]["first_email"] = row.first_email
+
+    # From recipient_emails (parse comma-separated)
+    email_pattern = re.compile(r"[\w.+-]+@[\w.-]+\.\w+")
+    name_email_pattern = re.compile(r'"?([^"<]*)"?\s*<([^>]+)>')
+
+    for row in recipient_rows:
+        raw = row.recipient_emails or ""
+        # Extract emails with optional names: "Name <email>" or just email
+        for match in name_email_pattern.finditer(raw):
+            name, email = match.group(1).strip(), match.group(2).strip().lower()
+            if f"@{domain}" not in email:
+                continue
+            if email in existing_emails:
+                continue
+            if email not in people:
+                people[email] = {
+                    "email": match.group(2).strip(),
+                    "name": name if name else None,
+                    "email_count": 0,
+                    "last_email": None,
+                    "first_email": None,
+                }
+            people[email]["email_count"] += row.email_count
+            if not people[email]["name"] and name:
+                people[email]["name"] = name
+
+        # Also catch bare emails
+        for email_match in email_pattern.finditer(raw):
+            email = email_match.group(0).lower()
+            if f"@{domain}" not in email:
+                continue
+            if email in existing_emails:
+                continue
+            if email not in people:
+                people[email] = {
+                    "email": email_match.group(0),
+                    "name": None,
+                    "email_count": 0,
+                    "last_email": None,
+                    "first_email": None,
+                }
+
+    # Sort by email count descending
+    discovered = sorted(people.values(), key=lambda p: -p["email_count"])
+
+    # Serialize dates
+    for p in discovered:
+        p["last_email"] = serialize_dt(p["last_email"]) if p["last_email"] else None
+        p["first_email"] = serialize_dt(p["first_email"]) if p["first_email"] else None
+
+    return {"discovered": discovered, "domain": domain, "total": len(discovered)}
+
+
+# ---------------------------------------------------------------------------
+# POST /companies/{id}/contacts  — add a discovered person as a CRM contact
+# ---------------------------------------------------------------------------
+
+
+class AddContactRequest(BaseModel):
+    email: str
+    name: Optional[str] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+@router.post("/companies/{company_id}/contacts")
+def add_contact_to_company(
+    company_id: str,
+    body: AddContactRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_sync_db),
+):
+    """Create a new contact linked to this company from a discovered email."""
+    uid = user.id
+
+    company = db.query(Company).filter(Company.id == company_id, Company.user_id == uid).first()
+    if not company:
+        raise HTTPException(status_code=404, detail="Company not found")
+
+    # Check for existing contact with this email
+    existing = (
+        db.query(Contact)
+        .filter(Contact.user_id == uid, Contact.email == body.email.lower().strip())
+        .first()
+    )
+    if existing:
+        # If contact exists but at a different company, optionally reassign
+        if existing.company_id != company.id:
+            existing.company_id = company.id
+            db.commit()
+            db.refresh(existing)
+        return {
+            "contact": {
+                "id": str(existing.id),
+                "email": existing.email,
+                "name": existing.name,
+                "company_id": str(existing.company_id) if existing.company_id else None,
+            },
+            "created": False,
+        }
+
+    # Count emails for this person
+    email_lower = body.email.lower().strip()
+    email_count_result = (
+        db.query(func.count(Email.id))
+        .filter(
+            Email.user_id == uid,
+            or_(
+                func.lower(Email.sender_email) == email_lower,
+                func.lower(Email.recipient_emails).contains(email_lower),
+            ),
+        )
+        .scalar()
+    )
+
+    contact = Contact(
+        id=uuid.uuid4(),
+        user_id=uid,
+        company_id=company.id,
+        email=email_lower,
+        name=body.name,
+        email_count=email_count_result or 0,
+        account_sources=[],
+    )
+    db.add(contact)
+    db.commit()
+    db.refresh(contact)
+
+    return {
+        "contact": {
+            "id": str(contact.id),
+            "email": contact.email,
+            "name": contact.name,
+            "company_id": str(contact.company_id),
+            "email_count": contact.email_count,
+        },
+        "created": True,
+    }
+
+
+# ---------------------------------------------------------------------------
 # PATCH /companies/{id}
 # ---------------------------------------------------------------------------
 
@@ -752,11 +988,7 @@ def update_company(
     """Update editable company fields."""
     uid = user.id
 
-    company = (
-        db.query(Company)
-        .filter(Company.id == company_id, Company.user_id == uid)
-        .first()
-    )
+    company = db.query(Company).filter(Company.id == company_id, Company.user_id == uid).first()
     if not company:
         raise HTTPException(status_code=404, detail="Company not found")
 
