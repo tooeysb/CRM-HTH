@@ -81,8 +81,10 @@ function crmApp() {
         // ==================== API HELPERS ====================
         async apiFetch(path, options = {}) {
             try {
+                const headers = { 'Content-Type': 'application/json', ...options.headers };
+                if (window.CRM_API_KEY) headers['X-API-Key'] = window.CRM_API_KEY;
                 const resp = await fetch('/crm/api/' + path, {
-                    headers: { 'Content-Type': 'application/json', ...options.headers },
+                    headers,
                     ...options,
                 });
                 if (!resp.ok) throw new Error(`API error: ${resp.status}`);

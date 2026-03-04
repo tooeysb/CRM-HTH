@@ -255,10 +255,7 @@ class TestPublicEndpoints:
         )
 
     def test_root_is_public(self, unauthed_client: TestClient):
-        """GET / must return 200 without any API key."""
-        response = unauthed_client.get("/")
-        assert response.status_code == 200
-
-        data = response.json()
-        assert data["status"] == "healthy"
-        assert "service" in data
+        """GET / redirects to /crm without any API key."""
+        response = unauthed_client.get("/", follow_redirects=False)
+        assert response.status_code == 307
+        assert "/crm" in response.headers["location"]

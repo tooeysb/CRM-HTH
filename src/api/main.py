@@ -4,9 +4,11 @@ FastAPI application entry point.
 
 from contextlib import asynccontextmanager
 
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from src.api.middleware.correlation import CorrelationIdMiddleware
@@ -102,9 +104,16 @@ app.include_router(crm.router, prefix="/crm/api", tags=["crm"])
 
 
 @app.get("/crm")
-async def crm_redirect():
-    """Redirect /crm to the CRM static frontend."""
-    return RedirectResponse(url="/crm/static/index.html")
+async def crm_frontend():
+    """Serve CRM frontend with API key injected."""
+    html_path = Path("src/static/crm/index.html")
+    html = html_path.read_text()
+    # Inject API key before closing </head> so apiFetch can authenticate
+    api_key_script = (
+        f'<script>window.CRM_API_KEY="{settings.secret_key}";</script></head>'
+    )
+    html = html.replace("</head>", api_key_script)
+    return HTMLResponse(content=html)
 
 
 # Static file mounts (must be after all route registrations)
