@@ -235,6 +235,11 @@ class GmailAuthService:
             scopes=decrypted_creds.get("scopes"),
         )
 
+        # Restore expiry so expired tokens trigger refresh
+        expiry_str = decrypted_creds.get("expiry")
+        if expiry_str:
+            credentials.expiry = datetime.fromisoformat(expiry_str)
+
         # Check if token is expired and refresh if needed
         if credentials.expired and credentials.refresh_token:
             logger.info(f"Token expired for account_id={account_id}, refreshing...")

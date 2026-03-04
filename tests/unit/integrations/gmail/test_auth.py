@@ -184,7 +184,7 @@ class TestHandleCallback:
 
     @pytest.mark.asyncio
     async def test_handle_callback_success(
-        self, auth_service, mock_db_session, test_user, mock_credentials
+        self, auth_service, mock_db_session, test_user
     ):
         """Test successful OAuth2 callback handling."""
         state_token = f"random_token_123.{test_user.id}.procore-main"
@@ -195,11 +195,19 @@ class TestHandleCallback:
         mock_result.scalar_one_or_none.return_value = test_user
         mock_db_session.execute.return_value = mock_result
 
-        # Mock OAuth2 flow
+        # Mock OAuth2 flow with MagicMock credentials (not real Credentials)
         with patch("src.integrations.gmail.auth.Flow") as mock_flow_class:
             mock_flow = MagicMock()
-            mock_flow.credentials = mock_credentials
-            mock_flow.credentials.id_token = {"email": "test@procore.com"}
+            mock_creds = MagicMock()
+            mock_creds.id_token = {"email": "test@procore.com"}
+            mock_creds.token = "test-access-token"
+            mock_creds.refresh_token = "test-refresh-token"
+            mock_creds.token_uri = "https://oauth2.googleapis.com/token"
+            mock_creds.client_id = "test-client-id"
+            mock_creds.client_secret = "test-client-secret"
+            mock_creds.scopes = ["https://www.googleapis.com/auth/gmail.readonly"]
+            mock_creds.expiry = None
+            mock_flow.credentials = mock_creds
             mock_flow_class.from_client_config.return_value = mock_flow
 
             # Mock credential encryption
@@ -328,7 +336,8 @@ class TestGetCredentials:
         mock_result.scalar_one_or_none.return_value = test_gmail_account
         mock_db_session.execute.return_value = mock_result
 
-        # Mock expired credentials
+        # Mock expired credentials (expiry in the past triggers refresh)
+        expired_time = (datetime.utcnow() - timedelta(hours=1)).isoformat()
         decrypted_creds = {
             "token": "old-access-token",
             "refresh_token": "test-refresh-token",
@@ -338,7 +347,7 @@ class TestGetCredentials:
             "scopes": [
                 "https://www.googleapis.com/auth/gmail.readonly",
             ],
-            "expiry": (datetime.utcnow() - timedelta(hours=1)).isoformat(),  # Expired
+            "expiry": expired_time,
         }
         auth_service._decrypt_credentials = AsyncMock(return_value=decrypted_creds)
         auth_service._update_credentials = AsyncMock()
@@ -346,7 +355,7 @@ class TestGetCredentials:
         with patch.object(Credentials, "refresh") as mock_refresh:
             credentials = await auth_service.get_credentials(str(test_gmail_account.id))
 
-            # Verify refresh was called
+            # Verify refresh was called (expiry is now restored from decrypted creds)
             mock_refresh.assert_called_once()
 
             # Verify credentials were updated in database

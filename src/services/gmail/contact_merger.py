@@ -9,7 +9,7 @@ This service handles:
 """
 
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
@@ -152,9 +152,10 @@ def _resolve_name(contact_list: list[dict[str, Any]]) -> str | None:
         Best name to use, or None if all names are empty
     """
     # Sort by last_contact_at descending (most recent first)
+    # Use timezone-aware sentinel to avoid comparing naive vs aware datetimes
     sorted_contacts = sorted(
         contact_list,
-        key=lambda c: c.get("last_contact_at") or datetime.min,
+        key=lambda c: c.get("last_contact_at") or datetime.min.replace(tzinfo=timezone.utc),
         reverse=True,
     )
 

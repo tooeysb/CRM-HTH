@@ -1,5 +1,7 @@
 """
 Unit tests for Gmail rate limiter.
+
+Tests the token bucket rate limiter backed by Redis with atomic Lua script.
 """
 
 import time
@@ -22,9 +24,9 @@ def mock_redis():
         redis_mock = MagicMock()
         mock.return_value = redis_mock
 
-        # Default: full bucket of tokens
-        redis_mock.get.side_effect = lambda key: None
-        redis_mock.pipeline.return_value.execute.return_value = [None, None]
+        # register_script returns a callable script object
+        script_mock = MagicMock()
+        redis_mock.register_script.return_value = script_mock
 
         yield redis_mock
 
@@ -55,65 +57,64 @@ class TestGmailRateLimiter:
         assert limiter.refill_rate == 250.0
         assert limiter.redis_url == "redis://localhost:6379/0"
 
-    def test_acquire_success(self, rate_limiter, mock_redis):
-        """Test successful token acquisition."""
-        # Setup: bucket has 10 tokens
-        mock_redis.pipeline.return_value.execute.return_value = ["10.0", str(time.time())]
+    def test_acquire_success(self, rate_limiter):
+        """Test successful token acquisition via Lua script."""
+        # Lua script returns 1 = tokens acquired
+        rate_limiter._acquire_script.return_value = 1
 
         result = rate_limiter.acquire(tokens=1)
 
         assert result is True
-        # Verify token was consumed
-        mock_redis.set.assert_called()
+        rate_limiter._acquire_script.assert_called_once()
+        # Verify correct keys and args were passed
+        call_kwargs = rate_limiter._acquire_script.call_args
+        assert call_kwargs.kwargs["keys"] == [
+            rate_limiter.bucket_key,
+            rate_limiter.timestamp_key,
+        ]
 
-    def test_acquire_failure(self, rate_limiter, mock_redis):
+    def test_acquire_failure(self, rate_limiter):
         """Test token acquisition failure when bucket is empty."""
-        # Setup: bucket has 0 tokens
-        mock_redis.pipeline.return_value.execute.return_value = ["0.0", str(time.time())]
+        # Lua script returns 0 = insufficient tokens
+        rate_limiter._acquire_script.return_value = 0
 
         result = rate_limiter.acquire(tokens=1)
 
         assert result is False
 
-    def test_refill_tokens(self, rate_limiter, mock_redis):
-        """Test token refill over time."""
-        # Setup: bucket has 5 tokens, last refill was 1 second ago
-        past_time = time.time() - 1.0
-        mock_redis.pipeline.return_value.execute.return_value = ["5.0", str(past_time)]
+    def test_acquire_redis_connection_error(self, rate_limiter):
+        """Test acquire returns None on Redis connection failure."""
+        import redis as redis_lib
 
-        tokens = rate_limiter._refill_tokens()
+        rate_limiter._acquire_script.side_effect = redis_lib.ConnectionError("down")
 
-        # Should have refilled 10 tokens (10 tokens/sec * 1 sec)
-        # But capped at max_tokens (10)
-        assert tokens == 10.0
+        result = rate_limiter.acquire(tokens=1)
 
-    def test_refill_tokens_capped_at_max(self, rate_limiter, mock_redis):
-        """Test token refill is capped at max_tokens."""
-        # Setup: bucket has 8 tokens, last refill was 5 seconds ago
-        past_time = time.time() - 5.0
-        mock_redis.pipeline.return_value.execute.return_value = ["8.0", str(past_time)]
+        assert result is None
 
-        tokens = rate_limiter._refill_tokens()
-
-        # Should try to add 50 tokens (10 tokens/sec * 5 sec)
-        # But capped at max_tokens (10)
-        assert tokens == 10.0
-
-    def test_wait_for_token_success(self, rate_limiter, mock_redis):
+    def test_wait_for_token_success(self, rate_limiter):
         """Test wait_for_token successfully acquires token."""
-        # Setup: bucket has tokens
-        mock_redis.pipeline.return_value.execute.return_value = ["10.0", str(time.time())]
+        rate_limiter._acquire_script.return_value = 1
 
         # Should not raise exception
         rate_limiter.wait_for_token(timeout=1.0)
 
-    def test_wait_for_token_timeout(self, rate_limiter, mock_redis):
+    def test_wait_for_token_timeout(self, rate_limiter):
         """Test wait_for_token times out when no tokens available."""
-        # Setup: bucket always has 0 tokens
-        mock_redis.pipeline.return_value.execute.return_value = ["0.0", str(time.time())]
+        # Lua script always returns 0 (no tokens)
+        rate_limiter._acquire_script.return_value = 0
 
         with pytest.raises(GmailRateLimitExceeded):
             rate_limiter.wait_for_token(timeout=0.2)
+
+    def test_wait_for_token_redis_fallback(self, rate_limiter):
+        """Test wait_for_token falls back to local sleep when Redis unavailable."""
+        import redis as redis_lib
+
+        rate_limiter._acquire_script.side_effect = redis_lib.ConnectionError("down")
+
+        # Should not raise - falls back to local rate limiting
+        rate_limiter.wait_for_token(timeout=1.0)
 
     def test_get_token_count(self, rate_limiter, mock_redis):
         """Test getting current token count."""
@@ -127,11 +128,11 @@ class TestGmailRateLimiter:
         """Test resetting rate limiter to full capacity."""
         rate_limiter.reset()
 
-        # Verify Redis was updated with max tokens
+        # Verify Redis was updated with max tokens via pipeline
         calls = mock_redis.pipeline.return_value.set.call_args_list
         assert len(calls) >= 2
-        # First call should set tokens to max_tokens
-        assert calls[0][0][1] == "10.0"
+        # First call should set tokens to max_tokens (int -> str)
+        assert calls[0][0][1] == str(rate_limiter.max_tokens)
 
     def test_close(self, rate_limiter, mock_redis):
         """Test closing Redis connection."""
@@ -143,9 +144,9 @@ class TestGmailRateLimiter:
 class TestRateLimitedDecorator:
     """Test suite for rate_limited decorator."""
 
-    def test_rate_limited_decorator(self, rate_limiter, mock_redis):
+    def test_rate_limited_decorator(self, rate_limiter):
         """Test rate_limited decorator enforces rate limiting."""
-        mock_redis.pipeline.return_value.execute.return_value = ["10.0", str(time.time())]
+        rate_limiter._acquire_script.return_value = 1
 
         call_count = 0
 
@@ -233,7 +234,7 @@ class TestDistributedRateLimiting:
     """Test suite for distributed rate limiting scenarios."""
 
     def test_multiple_instances_share_state(self, mock_redis):
-        """Test multiple rate limiter instances share Redis state."""
+        """Test multiple rate limiter instances share Redis keys."""
         limiter1 = GmailRateLimiter(
             redis_url="redis://localhost:6379/0",
             max_tokens=10,
@@ -251,18 +252,18 @@ class TestDistributedRateLimiting:
 
     def test_token_consumption_across_instances(self, mock_redis):
         """Test token consumption is tracked across instances."""
-        # Setup: bucket has 5 tokens
-        mock_redis.pipeline.return_value.execute.return_value = ["5.0", str(time.time())]
-
         limiter1 = GmailRateLimiter(
             redis_url="redis://localhost:6379/0",
             max_tokens=10,
             refill_rate=10.0,
         )
 
+        # Lua script returns 1 = tokens acquired
+        limiter1._acquire_script.return_value = 1
+
         # Instance 1 acquires token
         result = limiter1.acquire(tokens=1)
         assert result is True
 
-        # Verify Redis was updated (token consumed)
-        mock_redis.set.assert_called()
+        # Verify Lua script was called (atomic operation)
+        limiter1._acquire_script.assert_called_once()

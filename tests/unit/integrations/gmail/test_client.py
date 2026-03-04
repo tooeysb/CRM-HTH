@@ -257,8 +257,8 @@ class TestFetchMessageBatch:
                         ],
                     },
                 }
-                # Find the callback that was added to the batch
-                callback = mock_batch.add.call_args_list[i][0][1]
+                # Callback is passed as keyword arg: batch.add(request, callback=callback)
+                callback = mock_batch.add.call_args_list[i][1]["callback"]
                 callback(msg_id, mock_message, None)
 
         mock_batch.execute.side_effect = execute_batch
@@ -278,9 +278,9 @@ class TestFetchMessageBatch:
         assert emails == []
 
     def test_fetch_message_batch_large_list(self, client, mock_rate_limiter):
-        """Test batch fetching splits large lists into chunks."""
-        # Create 250 message IDs (should be split into 3 chunks: 100, 100, 50)
-        message_ids = [f"msg{i}" for i in range(250)]
+        """Test batch fetching splits large lists into chunks of 20."""
+        # Create 60 message IDs (should be split into 3 chunks: 20, 20, 20)
+        message_ids = [f"msg{i}" for i in range(60)]
 
         mock_batch = MagicMock()
         client.gmail_service.new_batch_http_request.return_value = mock_batch
@@ -288,7 +288,7 @@ class TestFetchMessageBatch:
 
         client.fetch_message_batch(message_ids)
 
-        # Should call new_batch_http_request 3 times (3 chunks)
+        # Should call new_batch_http_request 3 times (3 chunks of 20)
         assert client.gmail_service.new_batch_http_request.call_count == 3
         # Should call wait_for_token 3 times (once per chunk)
         assert mock_rate_limiter.wait_for_token.call_count == 3
@@ -302,7 +302,7 @@ class TestFetchMessageBatch:
 
         def execute_batch():
             # First message succeeds, second fails
-            callback1 = mock_batch.add.call_args_list[0][0][1]
+            callback1 = mock_batch.add.call_args_list[0][1]["callback"]
             callback1("msg1", {
                 "id": "msg1",
                 "threadId": "thread1",
@@ -313,7 +313,7 @@ class TestFetchMessageBatch:
                 ]},
             }, None)
 
-            callback2 = mock_batch.add.call_args_list[1][0][1]
+            callback2 = mock_batch.add.call_args_list[1][1]["callback"]
             callback2("msg2", None, Exception("API Error"))
 
         mock_batch.execute.side_effect = execute_batch
