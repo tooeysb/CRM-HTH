@@ -33,6 +33,11 @@ python-dateutil==2.8.2
 pyyaml==6.0.1
 python-slugify==8.0.4
 
+# News Intelligence
+beautifulsoup4==4.12.3
+feedparser==6.0.11
+lxml==5.1.0
+
 # Cryptography
 cryptography==42.0.2
 

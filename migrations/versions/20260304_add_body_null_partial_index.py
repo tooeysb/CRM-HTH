@@ -21,7 +21,7 @@ def upgrade() -> None:
     #   LIMIT 500 FOR UPDATE SKIP LOCKED
     # Only indexes rows where body IS NULL, so it shrinks as backfill progresses.
     op.execute(
-        "CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_emails_body_null "
+        "CREATE INDEX IF NOT EXISTS ix_emails_body_null "
         "ON emails (account_id) WHERE body IS NULL"
     )
 

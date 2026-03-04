@@ -76,6 +76,11 @@ class Settings(BaseSettings):
     )
     draft_max_examples: int = Field(default=5, alias="DRAFT_MAX_EXAMPLES")
 
+    # News Intelligence
+    news_scrape_enabled: bool = Field(default=True, alias="NEWS_SCRAPE_ENABLED")
+    news_relevance_threshold: float = Field(default=0.7, alias="NEWS_RELEVANCE_THRESHOLD")
+    news_max_drafts_per_item: int = Field(default=3, alias="NEWS_MAX_DRAFTS_PER_ITEM")
+
     # Optional: Monitoring
     sentry_dsn: str | None = Field(default=None, alias="SENTRY_DSN")
     flower_port: int = Field(default=5555, alias="FLOWER_PORT")

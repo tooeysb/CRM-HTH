@@ -38,6 +38,22 @@ function crmApp() {
             filters: { company_type: '', account_tier: '' },
         },
 
+        // Outreach
+        outreach: {
+            loading: true,
+            stats: {},
+            items: [],
+            total: 0,
+            page: 1,
+            pageSize: 20,
+            totalPages: 0,
+            filter: 'pending',
+            editingId: null,
+            editSubject: '',
+            editBody: '',
+            pipelineRunning: false,
+        },
+
         // Detail panel
         detail: {
             show: false,
@@ -75,6 +91,8 @@ function crmApp() {
                 this.loadContacts();
             } else if (view === 'companies' && this.companies.items.length === 0) {
                 this.loadCompanies();
+            } else if (view === 'outreach') {
+                this.loadOutreach();
             }
         },
 
@@ -380,6 +398,90 @@ function crmApp() {
                 this.searchResults = data;
                 this.showSearchResults = true;
             }
+        },
+
+        // ==================== OUTREACH ====================
+        async loadOutreach() {
+            this.outreach.loading = true;
+            const [stats, suggestions] = await Promise.all([
+                this.apiFetch('outreach/dashboard'),
+                this.apiFetch('outreach/suggestions?page=' + this.outreach.page + '&page_size=' + this.outreach.pageSize + '&status=' + this.outreach.filter),
+            ]);
+            if (stats) this.outreach.stats = stats;
+            if (suggestions) {
+                this.outreach.items = suggestions.items || [];
+                this.outreach.total = suggestions.total || 0;
+                this.outreach.totalPages = suggestions.total_pages || 0;
+            }
+            this.outreach.loading = false;
+        },
+
+        async loadSuggestions() {
+            const data = await this.apiFetch('outreach/suggestions?page=' + this.outreach.page + '&page_size=' + this.outreach.pageSize + '&status=' + this.outreach.filter);
+            if (data) {
+                this.outreach.items = data.items || [];
+                this.outreach.total = data.total || 0;
+                this.outreach.totalPages = data.total_pages || 0;
+            }
+        },
+
+        startEditSuggestion(s) {
+            this.outreach.editingId = s.id;
+            this.outreach.editSubject = s.subject;
+            this.outreach.editBody = s.body;
+        },
+
+        async saveSuggestionEdit(id) {
+            await this.apiFetch('outreach/suggestions/' + id, {
+                method: 'PATCH',
+                body: JSON.stringify({ subject: this.outreach.editSubject, body: this.outreach.editBody }),
+            });
+            this.outreach.editingId = null;
+            this.loadSuggestions();
+        },
+
+        async updateSuggestionStatus(id, status) {
+            await this.apiFetch('outreach/suggestions/' + id, {
+                method: 'PATCH',
+                body: JSON.stringify({ status }),
+            });
+            this.loadSuggestions();
+            // Refresh stats
+            const stats = await this.apiFetch('outreach/dashboard');
+            if (stats) this.outreach.stats = stats;
+        },
+
+        async triggerPipeline() {
+            this.outreach.pipelineRunning = true;
+            await this.apiFetch('outreach/trigger', { method: 'POST' });
+            // Pipeline runs async - just update UI state
+            setTimeout(() => { this.outreach.pipelineRunning = false; }, 5000);
+        },
+
+        outreachCategoryBadge(cat) {
+            const map = {
+                'project_win': 'bg-green-100 text-green-800',
+                'project_completion': 'bg-blue-100 text-blue-800',
+                'executive_hire': 'bg-purple-100 text-purple-800',
+                'expansion': 'bg-amber-100 text-amber-800',
+                'partnership': 'bg-teal-100 text-teal-800',
+                'award': 'bg-yellow-100 text-yellow-800',
+                'financial_results': 'bg-indigo-100 text-indigo-800',
+            };
+            return map[cat] || 'bg-gray-100 text-gray-700';
+        },
+
+        outreachCategoryLabel(cat) {
+            const map = {
+                'project_win': 'Project Win',
+                'project_completion': 'Completion',
+                'executive_hire': 'New Hire',
+                'expansion': 'Expansion',
+                'partnership': 'Partnership',
+                'award': 'Award',
+                'financial_results': 'Financial',
+            };
+            return map[cat] || cat || 'News';
         },
 
         // ==================== SORTING ====================

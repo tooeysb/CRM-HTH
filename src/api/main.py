@@ -94,13 +94,14 @@ async def health_check():
 
 
 # Include routers
-from src.api.routers import auth, crm, dashboard, draft, scan
+from src.api.routers import auth, crm, dashboard, draft, outreach, scan
 
 app.include_router(auth.router, prefix="/auth", tags=["authentication"])
 app.include_router(scan.router, prefix="/scan", tags=["scanning"])
 app.include_router(dashboard.router, prefix="/dashboard", tags=["dashboard"])
 app.include_router(draft.router, prefix="/draft", tags=["draft"])
 app.include_router(crm.router, prefix="/crm/api", tags=["crm"])
+app.include_router(outreach.router, prefix="/crm/api/outreach", tags=["outreach"])
 
 
 @app.get("/crm")

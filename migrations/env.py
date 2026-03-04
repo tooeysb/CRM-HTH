@@ -1,30 +1,20 @@
 """
 Alembic environment configuration.
+
+Uses psycopg2 (sync) for migrations to avoid asyncpg + PgBouncer
+prepared statement issues. The DATABASE_URL is rewritten from
+postgresql+asyncpg:// to postgresql+psycopg2:// if needed.
 """
 
-import asyncio
 from logging.config import fileConfig
 
 from alembic import context
-from sqlalchemy import pool
-from sqlalchemy.engine import Connection
-from sqlalchemy.ext.asyncio import async_engine_from_config, create_async_engine
+from sqlalchemy import create_engine, pool
 
 from src.core.config import settings
 
 # Import all models for auto-generation to detect changes
-from src.models import (
-    Base,
-    Company,
-    Contact,
-    ContactEnrichment,
-    Email,
-    EmailParticipant,
-    EmailTag,
-    GmailAccount,
-    SyncJob,
-    User,
-)
+from src.models import Base  # noqa: F401 - imports all models via __init__
 
 # Alembic Config object
 config = context.config
@@ -33,19 +23,20 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Set database URL from settings (overrides alembic.ini)
-# Escape % for configparser's interpolation
-config.set_main_option("sqlalchemy.url", settings.database_url.replace("%", "%%"))
+# Normalize URL to psycopg2 for sync migrations
+_db_url = settings.database_url
+for prefix in ("postgresql+asyncpg://", "postgres://"):
+    _db_url = _db_url.replace(prefix, "postgresql+psycopg2://")
+if _db_url.startswith("postgresql://"):
+    _db_url = _db_url.replace("postgresql://", "postgresql+psycopg2://", 1)
 
-# Add your model's MetaData object here for 'autogenerate' support
+config.set_main_option("sqlalchemy.url", _db_url.replace("%", "%%"))
+
 target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
-    """
-    Run migrations in 'offline' mode.
-    This configures the context with just a URL and not an Engine.
-    """
+    """Run migrations in 'offline' mode."""
     url = config.get_main_option("sqlalchemy.url")
     context.configure(
         url=url,
@@ -53,38 +44,21 @@ def run_migrations_offline() -> None:
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
     )
-
     with context.begin_transaction():
         context.run_migrations()
-
-
-def do_run_migrations(connection: Connection) -> None:
-    """Run migrations with the given connection."""
-    context.configure(connection=connection, target_metadata=target_metadata)
-
-    with context.begin_transaction():
-        context.run_migrations()
-
-
-async def run_async_migrations() -> None:
-    """Run migrations in async mode."""
-    # Create engine directly with PgBouncer-compatible settings
-    async_url = settings.database_url.replace("postgresql://", "postgresql+asyncpg://")
-    connectable = create_async_engine(
-        async_url,
-        poolclass=pool.NullPool,
-        connect_args={"statement_cache_size": 0},  # Required for PgBouncer
-    )
-
-    async with connectable.connect() as connection:
-        await connection.run_sync(do_run_migrations)
-
-    await connectable.dispose()
 
 
 def run_migrations_online() -> None:
-    """Run migrations in 'online' mode."""
-    asyncio.run(run_async_migrations())
+    """Run migrations in 'online' mode using sync psycopg2."""
+    connectable = create_engine(
+        config.get_main_option("sqlalchemy.url"),
+        poolclass=pool.NullPool,
+    )
+    with connectable.connect() as connection:
+        context.configure(connection=connection, target_metadata=target_metadata)
+        with context.begin_transaction():
+            context.run_migrations()
+    connectable.dispose()
 
 
 if context.is_offline_mode():

@@ -4,6 +4,7 @@ Celery application configuration.
 
 import ssl
 from celery import Celery
+from celery.schedules import crontab
 
 from src.core.config import settings
 from src.core.logging import get_logger
@@ -15,7 +16,12 @@ celery_app = Celery(
     "gmail_obsidian_worker",
     broker=settings.redis_url,
     backend=settings.redis_url,
-    include=["src.worker.tasks", "src.worker.id_first_tasks", "src.worker.backfill_body_tasks"],
+    include=[
+        "src.worker.tasks",
+        "src.worker.id_first_tasks",
+        "src.worker.backfill_body_tasks",
+        "src.worker.news_tasks",
+    ],
 )
 
 # Celery configuration
@@ -42,6 +48,15 @@ if settings.redis_url.startswith("rediss://"):
     config["redis_backend_use_ssl"] = {"ssl_cert_reqs": ssl.CERT_NONE}
 
 celery_app.conf.update(config)
+
+# Daily news intelligence pipeline at 5 AM UTC (1 AM EST)
+celery_app.conf.beat_schedule = {
+    "daily-news-pipeline": {
+        "task": "run_news_pipeline",
+        "schedule": crontab(hour=5, minute=0),
+        "args": ["d4475ca3-0ddc-4ea0-ac89-95ae7fed1e31"],
+    },
+}
 
 
 @celery_app.task(bind=True)
