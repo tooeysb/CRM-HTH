@@ -842,7 +842,9 @@ def get_discovered_contacts(
         raw = row.recipient_emails or ""
         # Extract emails with optional names: "Name <email>" or just email
         for match in name_email_pattern.finditer(raw):
-            name, email = match.group(1).strip(), match.group(2).strip().lower()
+            raw_name = match.group(1).strip().strip(",").strip()
+            name = raw_name if raw_name else None
+            email = match.group(2).strip().lower()
             if f"@{domain}" not in email:
                 continue
             if email in existing_emails:
@@ -850,7 +852,7 @@ def get_discovered_contacts(
             if email not in people:
                 people[email] = {
                     "email": match.group(2).strip(),
-                    "name": name if name else None,
+                    "name": name,
                     "email_count": 0,
                     "last_email": None,
                     "first_email": None,
@@ -859,7 +861,7 @@ def get_discovered_contacts(
             if not people[email]["name"] and name:
                 people[email]["name"] = name
 
-        # Also catch bare emails
+        # Also catch bare emails not already captured by name_email_pattern
         for email_match in email_pattern.finditer(raw):
             email = email_match.group(0).lower()
             if f"@{domain}" not in email:
@@ -874,6 +876,7 @@ def get_discovered_contacts(
                     "last_email": None,
                     "first_email": None,
                 }
+                people[email]["email_count"] += row.email_count
 
     # Sort by email count descending
     discovered = sorted(people.values(), key=lambda p: -p["email_count"])
