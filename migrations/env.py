@@ -13,7 +13,18 @@ from sqlalchemy.ext.asyncio import async_engine_from_config, create_async_engine
 from src.core.config import settings
 
 # Import all models for auto-generation to detect changes
-from src.models import Base, Contact, Email, EmailTag, GmailAccount, SyncJob, User
+from src.models import (
+    Base,
+    Company,
+    Contact,
+    ContactEnrichment,
+    Email,
+    EmailParticipant,
+    EmailTag,
+    GmailAccount,
+    SyncJob,
+    User,
+)
 
 # Alembic Config object
 config = context.config
@@ -58,8 +69,9 @@ def do_run_migrations(connection: Connection) -> None:
 async def run_async_migrations() -> None:
     """Run migrations in async mode."""
     # Create engine directly with PgBouncer-compatible settings
+    async_url = settings.database_url.replace("postgresql://", "postgresql+asyncpg://")
     connectable = create_async_engine(
-        settings.database_url,
+        async_url,
         poolclass=pool.NullPool,
         connect_args={"statement_cache_size": 0},  # Required for PgBouncer
     )

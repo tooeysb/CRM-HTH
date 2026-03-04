@@ -11,9 +11,13 @@ from src.models.base import Base, TimestampMixin, UUIDMixin
 
 if TYPE_CHECKING:
     from src.models.account import GmailAccount
+    from src.models.company import Company
     from src.models.contact import Contact
+    from src.models.contact_enrichment import ContactEnrichment
     from src.models.email import Email
     from src.models.job import SyncJob
+    from src.models.relationship_profile import RelationshipProfile
+    from src.models.voice_profile import VoiceProfile
 
 
 class User(Base, UUIDMixin, TimestampMixin):
@@ -42,6 +46,18 @@ class User(Base, UUIDMixin, TimestampMixin):
 
     sync_jobs: Mapped[list["SyncJob"]] = relationship(
         "SyncJob", back_populates="user", cascade="all, delete-orphan"
+    )
+
+    relationship_profiles: Mapped[list["RelationshipProfile"]] = relationship(
+        "RelationshipProfile", back_populates="user", cascade="all, delete-orphan"
+    )
+
+    voice_profiles: Mapped[list["VoiceProfile"]] = relationship(
+        "VoiceProfile", back_populates="user", cascade="all, delete-orphan"
+    )
+
+    companies: Mapped[list["Company"]] = relationship(
+        "Company", back_populates="user", cascade="all, delete-orphan"
     )
 
     def __repr__(self) -> str:

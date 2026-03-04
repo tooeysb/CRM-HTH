@@ -69,6 +69,13 @@ class Settings(BaseSettings):
         alias="CLAUDE_MODEL",
     )
 
+    # Email Drafting
+    draft_model: str = Field(
+        default="claude-sonnet-4-5-20250929",
+        alias="DRAFT_MODEL",
+    )
+    draft_max_examples: int = Field(default=5, alias="DRAFT_MAX_EXAMPLES")
+
     # Optional: Monitoring
     sentry_dsn: str | None = Field(default=None, alias="SENTRY_DSN")
     flower_port: int = Field(default=5555, alias="FLOWER_PORT")

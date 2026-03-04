@@ -5,13 +5,16 @@ Contact model with multi-account merging support.
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import ARRAY, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import ARRAY, Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy.dialects.postgresql import JSON, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.models.base import Base, TimestampMixin, UUIDMixin
 
 if TYPE_CHECKING:
+    from src.models.company import Company
+    from src.models.contact_enrichment import ContactEnrichment
+    from src.models.email_participant import EmailParticipant
     from src.models.user import User
 
 
@@ -28,6 +31,14 @@ class Contact(Base, UUIDMixin, TimestampMixin):
     # Foreign Keys
     user_id: Mapped[UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+
+    company_id: Mapped[UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("companies.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        comment="Company this contact belongs to",
     )
 
     # Contact Info
@@ -67,6 +78,43 @@ class Contact(Base, UUIDMixin, TimestampMixin):
         comment="Relationship type (colleague, client, friend, family)",
     )
 
+    # CRM Enrichment Fields
+    title: Mapped[str | None] = mapped_column(
+        String(255), nullable=True, comment="Job title"
+    )
+
+    personal_email: Mapped[str | None] = mapped_column(
+        String(255), nullable=True, comment="Personal email address (separate from work email)"
+    )
+
+    contact_type: Mapped[str | None] = mapped_column(
+        String(50), nullable=True, comment="Contact type (e.g., Champion, Decision Maker)"
+    )
+
+    is_vip: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False, comment="VIP flag for high-priority contacts"
+    )
+
+    tags: Mapped[list[str]] = mapped_column(
+        ARRAY(String),
+        default=[],
+        server_default="{}",
+        nullable=False,
+        comment="Freeform tags for contact categorization",
+    )
+
+    salesforce_id: Mapped[str | None] = mapped_column(
+        String(100), nullable=True, comment="Salesforce Contact ID"
+    )
+
+    address: Mapped[str | None] = mapped_column(
+        Text, nullable=True, comment="Mailing address"
+    )
+
+    source_data: Mapped[dict | None] = mapped_column(
+        JSON, nullable=True, comment="Raw imported CRM data for reference"
+    )
+
     last_contact_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
@@ -75,6 +123,16 @@ class Contact(Base, UUIDMixin, TimestampMixin):
 
     # Relationships
     user: Mapped["User"] = relationship("User", back_populates="contacts")
+
+    company: Mapped["Company | None"] = relationship("Company", back_populates="contacts")
+
+    enrichments: Mapped[list["ContactEnrichment"]] = relationship(
+        "ContactEnrichment", back_populates="contact"
+    )
+
+    email_participants: Mapped[list["EmailParticipant"]] = relationship(
+        "EmailParticipant", back_populates="contact"
+    )
 
     def __repr__(self) -> str:
         return f"<Contact(id={self.id}, name={self.name}, email={self.email}, accounts={self.account_sources})>"
