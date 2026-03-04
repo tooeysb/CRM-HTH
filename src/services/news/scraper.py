@@ -276,7 +276,7 @@ class NewsScraperService:
             encoded = quote(f'"{search_name}"')
             feed_url = (
                 f"https://news.google.com/rss/search?"
-                f"q={encoded}+construction&hl=en-US&gl=US&ceid=US:en&when=30d"
+                f"q={encoded}+construction&hl=en-US&gl=US&ceid=US:en&when=3d"
             )
 
             try:
