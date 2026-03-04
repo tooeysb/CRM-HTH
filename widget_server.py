@@ -17,7 +17,7 @@ from sqlalchemy import create_engine, text
 from src.core.config import settings
 
 PORT = 8765
-API_URL = "https://gmail-obsidian-sync-729716d2143d.herokuapp.com/dashboard/stats"
+API_URL = "https://crm-hth-0f0e9a31256d.herokuapp.com/dashboard/stats"
 
 # Shared DB engine (created once at startup)
 _engine = create_engine(settings.database_url, pool_pre_ping=True, pool_size=1, max_overflow=0)

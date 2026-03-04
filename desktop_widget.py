@@ -15,7 +15,7 @@ import tkinter as tk
 from datetime import datetime
 from urllib.request import urlopen
 
-API_URL = "https://gmail-obsidian-sync-729716d2143d.herokuapp.com/dashboard/stats"
+API_URL = "https://crm-hth-0f0e9a31256d.herokuapp.com/dashboard/stats"
 REFRESH_INTERVAL = 10000  # 10 seconds in milliseconds
 
 

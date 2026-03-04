@@ -175,6 +175,7 @@ def list_news_items(
     page_size: int = Query(20, ge=1, le=100),
     status: Optional[str] = None,
     category: Optional[str] = None,
+    company_id: Optional[str] = None,
     sort_by: str = "created_at",
     sort_dir: str = "desc",
     user: User = Depends(get_current_user),
@@ -189,6 +190,9 @@ def list_news_items(
         .options(joinedload(CompanyNewsItem.company))
         .filter(CompanyNewsItem.user_id == user.id)
     )
+
+    if company_id:
+        query = query.filter(CompanyNewsItem.company_id == company_id)
 
     if status:
         query = query.filter(CompanyNewsItem.status == status)

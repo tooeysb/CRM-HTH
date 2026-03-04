@@ -54,7 +54,11 @@ class NewsPageParser:
         if not articles:
             articles.extend(self._parse_news_containers(soup, base_url))
 
-        # Strategy 3: Links within date-annotated sections
+        # Strategy 3: Card-based layouts (div.card with links)
+        if not articles:
+            articles.extend(self._parse_card_links(soup, base_url))
+
+        # Strategy 4: Links within date-annotated sections
         if not articles:
             articles.extend(self._parse_dated_links(soup, base_url))
 
@@ -149,6 +153,53 @@ class NewsPageParser:
 
             if results:
                 break  # Found articles with this class pattern
+
+        return results
+
+    def _parse_card_links(self, soup: BeautifulSoup, base_url: str) -> list[dict]:
+        """Extract articles from card-based layouts (e.g. BldUp, Bootstrap cards)."""
+        results = []
+        cards = soup.find_all(
+            "div",
+            class_=lambda c: c and "card" in (c if isinstance(c, list) else [c]),
+            limit=50,
+        )
+        for card in cards:
+            link = card.find("a", href=True)
+            if not link:
+                continue
+            href = link["href"]
+            # Skip navigation/utility links
+            if href in ("#", "/") or len(href) < 5:
+                continue
+
+            title_el = card.find(["h2", "h3", "h4", "h5"]) or card.find(
+                class_=lambda c: c and "title" in str(c).lower()
+            )
+            if not title_el:
+                title_el = link
+            title = _extract_text(title_el, max_len=200)
+            if not title or len(title) < 10:
+                continue
+
+            url = urljoin(base_url, href)
+
+            date_el = card.find("time") or card.find(
+                class_=lambda c: c and "date" in str(c).lower()
+            )
+            published_at = _try_parse_date(date_el.get_text() if date_el else "")
+
+            snippet_el = card.find("p")
+            snippet = _extract_text(snippet_el, max_len=300) if snippet_el else ""
+
+            results.append(
+                {
+                    "title": title,
+                    "url": url,
+                    "published_at": published_at,
+                    "snippet": snippet,
+                }
+            )
 
         return results
 

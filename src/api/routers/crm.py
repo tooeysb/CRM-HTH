@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from src.api.middleware.auth import get_current_user
 from src.core.database import get_sync_db
+from src.core.logging import get_logger
 from src.core.utils import serialize_dt
 from src.models.company import Company
 from src.models.contact import Contact
@@ -20,6 +21,8 @@ from src.models.email import Email
 from src.models.email_participant import EmailParticipant
 from src.models.relationship_profile import RelationshipProfile
 from src.models.user import User
+
+_logger = get_logger(__name__)
 
 router = APIRouter()
 
@@ -138,6 +141,7 @@ class CompanyUpdateRequest(BaseModel):
     company_type: Optional[str] = None
     account_tier: Optional[str] = None
     industry: Optional[str] = None
+    news_search_override: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -234,6 +238,7 @@ def _serialize_company(company: Company, contact_count: int = 0) -> dict:
         "notes": company.notes,
         "contact_count": contact_count,
         "source_data": company.source_data,
+        "news_search_override": company.news_search_override,
         "created_at": serialize_dt(company.created_at),
         "updated_at": serialize_dt(company.updated_at),
     }
@@ -272,9 +277,15 @@ def crm_dashboard(user: User = Depends(get_current_user), db: Session = Depends(
         _serialize_contact(c, c.company.name if c.company else None) for c in top_contacts_q
     ]
 
-    # Recent 20 emails
+    # Recent 20 emails involving CRM contacts
     recent_emails_q = (
-        db.query(Email).filter(Email.user_id == uid).order_by(Email.date.desc()).limit(20).all()
+        db.query(Email)
+        .join(EmailParticipant, EmailParticipant.email_id == Email.id)
+        .filter(Email.user_id == uid, EmailParticipant.contact_id.isnot(None))
+        .order_by(Email.date.desc())
+        .distinct()
+        .limit(20)
+        .all()
     )
     recent_emails = [_serialize_email_dict(e) for e in recent_emails_q]
 
@@ -1194,4 +1205,277 @@ def global_search(
             _serialize_contact(c, c.company.name if c.company else None) for c in contacts
         ],
         "companies": [_serialize_company(c, 0) for c in companies],
+    }
+
+
+# ---------------------------------------------------------------------------
+# GET /reports/challenging-names
+# ---------------------------------------------------------------------------
+
+# Mirrors the skip logic from backfill_company_news.py
+_SKIP_NAMES = {
+    "target", "compass", "summit", "frontier", "core", "legacy", "pinnacle",
+    "premier", "sterling", "venture", "delta", "granite", "united", "national",
+    "american", "pacific", "western", "southern", "central", "modern", "royal",
+    "global", "metro", "universal", "general", "continental", "standard",
+    "classic", "executive", "commercial",
+}
+
+_SUFFIXES = [
+    " - hq", " - headquarters", " inc.", " inc", " corp.", " corp",
+    " llc", " llp", " ltd", " co.", " co", " group", " company", " corporation",
+]
+
+
+def _clean_name(name: str) -> str:
+    clean = name.strip()
+    lower = clean.lower()
+    for suffix in _SUFFIXES:
+        if lower.endswith(suffix):
+            clean = clean[: -len(suffix)].strip()
+            lower = clean.lower()
+    return clean
+
+
+@router.get("/reports/challenging-names")
+def report_challenging_names(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_sync_db),
+):
+    """Companies whose names are too short or generic for automated news search."""
+    uid = user.id
+    companies = (
+        db.query(Company)
+        .filter(
+            Company.user_id == uid,
+            Company.news_search_override.is_(None),
+        )
+        .order_by(Company.name)
+        .all()
+    )
+
+    results = []
+    for c in companies:
+        clean = _clean_name(c.name)
+        reason = None
+        if len(clean) <= 3:
+            reason = "too_short"
+        elif clean.lower() in _SKIP_NAMES:
+            reason = "generic_name"
+
+        if reason:
+            results.append({
+                "id": str(c.id),
+                "name": c.name,
+                "clean_name": clean,
+                "reason": reason,
+            })
+
+    return {"items": results, "total": len(results)}
+
+
+# ---------------------------------------------------------------------------
+# GET /reports/companies-without-people
+# ---------------------------------------------------------------------------
+
+
+@router.get("/reports/companies-without-people")
+def report_companies_without_people(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_sync_db),
+):
+    """Companies that have zero linked contacts/people."""
+    uid = user.id
+
+    # Subquery: company IDs that have at least one contact
+    has_contacts_sq = (
+        db.query(Contact.company_id)
+        .filter(Contact.company_id.isnot(None))
+        .distinct()
+        .subquery()
+    )
+
+    companies = (
+        db.query(Company)
+        .filter(
+            Company.user_id == uid,
+            ~Company.id.in_(db.query(has_contacts_sq.c.company_id)),
+        )
+        .order_by(Company.name)
+        .all()
+    )
+
+    results = [
+        {
+            "id": str(c.id),
+            "name": c.name,
+            "domain": c.domain,
+            "industry": c.industry,
+            "company_type": c.company_type,
+            "account_tier": c.account_tier,
+        }
+        for c in companies
+    ]
+
+    return {"items": results, "total": len(results)}
+
+
+# ---------------------------------------------------------------------------
+# POST /companies/{company_id}/scan-emails
+# ---------------------------------------------------------------------------
+
+
+class ScanEmailsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+@router.post("/companies/{company_id}/scan-emails")
+def scan_company_emails(
+    company_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_sync_db),
+):
+    """Trigger an email sync for the user's accounts (forward-sync only)."""
+    from src.models.job import SyncJob
+    from src.worker.tasks import scan_gmail_task
+
+    uid = user.id
+
+    # Verify company exists
+    company = (
+        db.query(Company)
+        .filter(Company.id == uuid.UUID(company_id), Company.user_id == uid)
+        .first()
+    )
+    if not company:
+        raise HTTPException(status_code=404, detail="Company not found")
+
+    # Check if a scan is already running
+    existing = (
+        db.query(SyncJob)
+        .filter(
+            SyncJob.user_id == uid,
+            SyncJob.status.in_(["queued", "running"]),
+        )
+        .first()
+    )
+    if existing:
+        raise HTTPException(
+            status_code=409,
+            detail="An email scan is already running.",
+        )
+
+    task = scan_gmail_task.delay(str(uid))
+    _logger.info("Triggered email scan from company %s, task %s", company_id, task.id)
+
+    return {"status": "queued", "message": "Email scan started", "job_id": task.id}
+
+
+# ---------------------------------------------------------------------------
+# POST /companies/{target_id}/merge
+# ---------------------------------------------------------------------------
+
+
+class MergeCompanyRequest(BaseModel):
+    source_id: str
+
+
+@router.post("/companies/{target_id}/merge")
+def merge_company(
+    target_id: str,
+    body: MergeCompanyRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_sync_db),
+):
+    """Merge source company into target company. Target survives."""
+    from src.models.company_news import CompanyNewsItem
+    from src.models.contact_enrichment import ContactEnrichment
+
+    uid = user.id
+    target_uuid = uuid.UUID(target_id)
+    source_uuid = uuid.UUID(body.source_id)
+
+    if target_uuid == source_uuid:
+        raise HTTPException(status_code=400, detail="Cannot merge a company into itself")
+
+    target = (
+        db.query(Company)
+        .filter(Company.id == target_uuid, Company.user_id == uid)
+        .first()
+    )
+    if not target:
+        raise HTTPException(status_code=404, detail="Target company not found")
+
+    source = (
+        db.query(Company)
+        .filter(Company.id == source_uuid, Company.user_id == uid)
+        .first()
+    )
+    if not source:
+        raise HTTPException(status_code=404, detail="Source company not found")
+
+    # 1. Move contacts
+    contacts_moved = (
+        db.query(Contact)
+        .filter(Contact.company_id == source_uuid)
+        .update({"company_id": target_uuid}, synchronize_session="fetch")
+    )
+
+    # 2. Move news items — handle unique constraint (company_id, source_url)
+    # Get URLs already on target
+    target_urls = set(
+        row[0]
+        for row in db.query(CompanyNewsItem.source_url)
+        .filter(CompanyNewsItem.company_id == target_uuid)
+        .all()
+    )
+
+    source_news = (
+        db.query(CompanyNewsItem)
+        .filter(CompanyNewsItem.company_id == source_uuid)
+        .all()
+    )
+
+    news_moved = 0
+    news_dupes = 0
+    for item in source_news:
+        if item.source_url in target_urls:
+            db.delete(item)
+            news_dupes += 1
+        else:
+            item.company_id = target_uuid
+            news_moved += 1
+
+    # 3. Move enrichments
+    enrichments_moved = (
+        db.query(ContactEnrichment)
+        .filter(ContactEnrichment.company_id == source_uuid)
+        .update({"company_id": target_uuid}, synchronize_session="fetch")
+    )
+
+    # 4. Delete source company (cascades remaining news items + draft suggestions)
+    db.delete(source)
+    db.commit()
+
+    _logger.info(
+        "Merged company %s into %s: %d contacts, %d news (%d dupes), %d enrichments",
+        source_uuid, target_uuid, contacts_moved, news_moved, news_dupes, enrichments_moved,
+    )
+
+    # Re-query target with contact count
+    contact_count = (
+        db.query(func.count(Contact.id))
+        .filter(Contact.company_id == target_uuid)
+        .scalar()
+    )
+
+    return {
+        "status": "merged",
+        "target": _serialize_company(target, contact_count),
+        "records_moved": {
+            "contacts": contacts_moved,
+            "news_items": news_moved,
+            "news_duplicates_removed": news_dupes,
+            "enrichments": enrichments_moved,
+        },
     }

@@ -1,5 +1,5 @@
 """
-Celery tasks for Gmail-to-Obsidian integration.
+Celery tasks for CRM-HTH email processing pipeline.
 Main orchestration task that coordinates phase modules.
 """
 

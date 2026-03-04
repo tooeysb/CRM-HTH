@@ -35,7 +35,7 @@ I identified five compounding sources of waste:
 
 #### Source 1: Small Batch Chunk Size (estimated loss: ~15-20%)
 
-**File**: `/Users/tooeycourtemanche/Documents/GitHub/Obsidian/src/integrations/gmail/client.py`, line 231
+**File**: `/Users/tooeycourtemanche/Documents/GitHub/CRM-HTH/src/integrations/gmail/client.py`, line 231
 
 ```python
 chunk_size = 20
@@ -56,7 +56,7 @@ With 10 Workspace workers, that is ~80 seconds of cumulative overhead eliminated
 
 #### Source 2: Celery Task Overhead per 100-Email Cycle (estimated loss: ~10-15%)
 
-**File**: `/Users/tooeycourtemanche/Documents/GitHub/Obsidian/src/worker/backfill_body_tasks.py`, lines 95-249
+**File**: `/Users/tooeycourtemanche/Documents/GitHub/CRM-HTH/src/worker/backfill_body_tasks.py`, lines 95-249
 
 Each 100-email cycle includes:
 
@@ -71,7 +71,7 @@ Conservative estimate: **500-1500ms of non-Gmail overhead per 100-email cycle**.
 
 #### Source 3: Rate Limiter Polling Delay (estimated loss: ~5-10%)
 
-**File**: `/Users/tooeycourtemanche/Documents/GitHub/Obsidian/src/integrations/gmail/rate_limiter.py`, line 177
+**File**: `/Users/tooeycourtemanche/Documents/GitHub/CRM-HTH/src/integrations/gmail/rate_limiter.py`, line 177
 
 ```python
 sleep_time = min(1.0 / self.refill_rate, 0.1)
@@ -83,7 +83,7 @@ More critically, when using chunk_size=20, each of the 5 workers requests 20 tok
 
 #### Source 4: Sequential Gmail Chunks Within a Worker (estimated loss: ~5%)
 
-**File**: `/Users/tooeycourtemanche/Documents/GitHub/Obsidian/src/integrations/gmail/client.py`, lines 232-235
+**File**: `/Users/tooeycourtemanche/Documents/GitHub/CRM-HTH/src/integrations/gmail/client.py`, lines 232-235
 
 ```python
 for i in range(0, len(message_ids), chunk_size):
@@ -96,7 +96,7 @@ Each chunk is fetched sequentially. With chunk_size=20 and batch_size=100, this 
 
 #### Source 5: `worker_max_tasks_per_child = 10` Creates Unnecessary Worker Restarts
 
-**File**: `/Users/tooeycourtemanche/Documents/GitHub/Obsidian/src/worker/celery_app.py`, line 29
+**File**: `/Users/tooeycourtemanche/Documents/GitHub/CRM-HTH/src/worker/celery_app.py`, line 29
 
 ```python
 "worker_max_tasks_per_child": 10,
@@ -123,7 +123,7 @@ This lines up with the observed 44% gap.
 
 ### 2.1 Calibration Check
 
-**File**: `/Users/tooeycourtemanche/Documents/GitHub/Obsidian/src/integrations/gmail/rate_limiter.py`
+**File**: `/Users/tooeycourtemanche/Documents/GitHub/CRM-HTH/src/integrations/gmail/rate_limiter.py`
 
 For the `tooey@procore.com` account:
 - `max_tokens = 200`, `refill_rate = 50.0`
@@ -342,7 +342,7 @@ Given the system is **already live and running**, a full rewrite carries risk. T
 
 ### 4.1 Stuck `__fetching__` Rows (CRITICAL)
 
-**File**: `/Users/tooeycourtemanche/Documents/GitHub/Obsidian/src/worker/backfill_body_tasks.py`
+**File**: `/Users/tooeycourtemanche/Documents/GitHub/CRM-HTH/src/worker/backfill_body_tasks.py`
 
 The review request document (line 149) acknowledges this: if a worker process is killed (OOM, Heroku dyno restart, SIGKILL), the `__fetching__` sentinel is never cleared. Those rows become permanently stuck.
 
@@ -378,7 +378,7 @@ This relies on `updated_at` being set when the sentinel is written (which it cur
 
 ### 4.2 Worker Death and Chain Breakage
 
-**File**: `/Users/tooeycourtemanche/Documents/GitHub/Obsidian/src/worker/backfill_body_tasks.py`, line 241
+**File**: `/Users/tooeycourtemanche/Documents/GitHub/CRM-HTH/src/worker/backfill_body_tasks.py`, line 241
 
 The self-sustaining chain pattern means if a worker dies after completing its batch but before spawning a replacement (line 241), that account loses one worker permanently. Over time, with `worker_max_tasks_per_child=10` causing process restarts, there is a non-zero chance of chain breakage reducing active workers.
 
@@ -388,7 +388,7 @@ The mitigation is that `task_acks_late=True` and `task_reject_on_worker_lost=Tru
 
 ### 4.3 Error Recovery on DB Write Failure (Line 213)
 
-**File**: `/Users/tooeycourtemanche/Documents/GitHub/Obsidian/src/worker/backfill_body_tasks.py`, lines 213-223
+**File**: `/Users/tooeycourtemanche/Documents/GitHub/CRM-HTH/src/worker/backfill_body_tasks.py`, lines 213-223
 
 The review request (line 152) notes: "DB write error after successful Gmail fetch: Currently would lose the fetched data." This is correct. If the DB write at line 206 fails (e.g., Supabase connection timeout), the `except` block at line 213 catches the exception, resets the sentinel to NULL, and re-raises. The Gmail API responses are lost and must be re-fetched.
 
@@ -398,7 +398,7 @@ The review request (line 152) notes: "DB write error after successful Gmail fetc
 
 ### 4.4 No Circuit Breaker for Gmail 429s
 
-**File**: `/Users/tooeycourtemanche/Documents/GitHub/Obsidian/src/integrations/gmail/client.py`, line 288
+**File**: `/Users/tooeycourtemanche/Documents/GitHub/CRM-HTH/src/integrations/gmail/client.py`, line 288
 
 When Gmail returns a 429 (rate limit exceeded), the `HttpError` is caught and re-raised as `GmailClientError`. The `@with_retry` decorator (line 197) retries with exponential backoff. However, the rate limiter does not react to 429s -- it continues issuing tokens at the same rate. All 5 workers for that account will independently hit the 429, back off, and retry, creating a burst of retried requests that may trigger another 429.
 
@@ -413,7 +413,7 @@ def report_rate_limit_hit(self):
 
 ### 4.5 `FOR UPDATE SKIP LOCKED` Without Partial Index
 
-**File**: `/Users/tooeycourtemanche/Documents/GitHub/Obsidian/src/worker/backfill_body_tasks.py`, lines 115-124
+**File**: `/Users/tooeycourtemanche/Documents/GitHub/CRM-HTH/src/worker/backfill_body_tasks.py`, lines 115-124
 
 The query:
 ```python
@@ -434,7 +434,7 @@ At 90% completion (~100K rows remaining out of 1.16M), the query planner may cho
 
 ### 5.1 Per-Row UPDATEs (CRITICAL -- Easy Win)
 
-**File**: `/Users/tooeycourtemanche/Documents/GitHub/Obsidian/src/worker/backfill_body_tasks.py`, lines 182-191
+**File**: `/Users/tooeycourtemanche/Documents/GitHub/CRM-HTH/src/worker/backfill_body_tasks.py`, lines 182-191
 
 ```python
 for gmail_id, body in body_map.items():
@@ -514,7 +514,7 @@ This index starts large (~1.16M entries) but **shrinks as the backfill progresse
 
 ### 5.3 Unnecessary COUNT(*) Query
 
-**File**: `/Users/tooeycourtemanche/Documents/GitHub/Obsidian/src/worker/backfill_body_tasks.py`, lines 227-234
+**File**: `/Users/tooeycourtemanche/Documents/GitHub/CRM-HTH/src/worker/backfill_body_tasks.py`, lines 227-234
 
 ```python
 remaining = (
@@ -542,7 +542,7 @@ With the partial index, this is a single index lookup (~1ms) instead of a full c
 
 ### 5.4 Module-Level Engine Creation
 
-**File**: `/Users/tooeycourtemanche/Documents/GitHub/Obsidian/src/worker/backfill_body_tasks.py`, line 30
+**File**: `/Users/tooeycourtemanche/Documents/GitHub/CRM-HTH/src/worker/backfill_body_tasks.py`, line 30
 
 ```python
 engine = create_engine(settings.database_url, pool_pre_ping=True)
@@ -574,7 +574,7 @@ engine = create_engine(
 **Risk**: Low
 **Effort**: 1 line change
 
-**File**: `/Users/tooeycourtemanche/Documents/GitHub/Obsidian/src/integrations/gmail/client.py`, line 231
+**File**: `/Users/tooeycourtemanche/Documents/GitHub/CRM-HTH/src/integrations/gmail/client.py`, line 231
 
 ```python
 # Before
@@ -831,7 +831,7 @@ The `build()` call makes an HTTP request to download the API discovery document.
 
 ### 9.2 `with_retry` Decorator Retries on All Exceptions (Line 248)
 
-**File**: `/Users/tooeycourtemanche/Documents/GitHub/Obsidian/src/integrations/gmail/rate_limiter.py`, lines 245-249
+**File**: `/Users/tooeycourtemanche/Documents/GitHub/CRM-HTH/src/integrations/gmail/rate_limiter.py`, lines 245-249
 
 ```python
 retry=retry_if_exception_type((GmailRateLimitExceeded, Exception)),
@@ -847,7 +847,7 @@ retry=retry_if_exception_type((GmailRateLimitExceeded, HttpError, ConnectionErro
 
 ### 9.3 `print()` Instead of `logger` in Callbacks (Line 264)
 
-**File**: `/Users/tooeycourtemanche/Documents/GitHub/Obsidian/src/integrations/gmail/client.py`, lines 264, 271
+**File**: `/Users/tooeycourtemanche/Documents/GitHub/CRM-HTH/src/integrations/gmail/client.py`, lines 264, 271
 
 ```python
 print(f"Error fetching message {request_id}: {exception}")

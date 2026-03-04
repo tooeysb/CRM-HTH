@@ -17,7 +17,7 @@ async def start_scan():
     """Start a new Gmail scan."""
     api_url = os.getenv(
         "APP_URL",
-        "https://gmail-obsidian-sync-729716d2143d.herokuapp.com"
+        "https://crm-hth-0f0e9a31256d.herokuapp.com"
     )
     user_id = os.getenv("USER_ID", "d4475ca3-0ddc-4ea0-ac89-95ae7fed1e31")
 

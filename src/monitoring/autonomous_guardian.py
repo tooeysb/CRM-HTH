@@ -37,7 +37,7 @@ class ScanGuardian:
     def __init__(self):
         self.engine = create_engine(settings.database_url)
         self.SessionLocal = sessionmaker(bind=self.engine)
-        self.api_url = os.getenv("APP_URL", "https://gmail-obsidian-sync-729716d2143d.herokuapp.com")
+        self.api_url = os.getenv("APP_URL", "https://crm-hth-0f0e9a31256d.herokuapp.com")
         self.user_id = os.getenv("USER_ID", "d4475ca3-0ddc-4ea0-ac89-95ae7fed1e31")
 
         # Monitoring thresholds
@@ -134,7 +134,7 @@ class ScanGuardian:
         """
         try:
             result = subprocess.run(
-                ["heroku", "logs", "-a", "gmail-obsidian-sync", "--dyno", "worker", "-n", "50"],
+                ["heroku", "logs", "-a", "crm-hth", "--dyno", "worker", "-n", "50"],
                 capture_output=True,
                 text=True,
                 timeout=10,

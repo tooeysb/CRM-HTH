@@ -1,10 +1,10 @@
 #!/bin/bash
 
-# Gmail-to-Obsidian Integration - Development Setup Script
+# CRM-HTH - Development Setup Script
 
 set -e
 
-echo "🚀 Gmail-to-Obsidian Integration - Development Setup"
+echo "🚀 CRM-HTH - Development Setup"
 echo ""
 
 # Check Python version

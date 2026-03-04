@@ -54,6 +54,13 @@ function crmApp() {
             pipelineRunning: false,
         },
 
+        // Reports
+        reports: {
+            loading: false,
+            challengingNames: [],
+            companiesWithoutPeople: [],
+        },
+
         // Detail panel
         detail: {
             show: false,
@@ -95,6 +102,8 @@ function crmApp() {
                 this.loadCompanies();
             } else if (view === 'outreach') {
                 this.loadOutreach();
+            } else if (view === 'reports') {
+                this.loadReports();
             }
         },
 
@@ -105,12 +114,13 @@ function crmApp() {
                 return;
             }
             const [view, id] = hash.split('/');
-            if (['dashboard', 'contacts', 'companies', 'outreach'].includes(view)) {
+            if (['dashboard', 'contacts', 'companies', 'outreach', 'reports'].includes(view)) {
                 this.currentView = view;
                 if (view === 'dashboard') this.loadDashboard();
                 else if (view === 'contacts') this.loadContacts();
                 else if (view === 'companies') this.loadCompanies();
                 else if (view === 'outreach') this.loadOutreach();
+                else if (view === 'reports') this.loadReports();
 
                 if (id) {
                     if (view === 'companies') this.openCompanyDetail(id);
@@ -281,7 +291,7 @@ function crmApp() {
         },
 
         async openCompanyDetail(id) {
-            this.detail = { show: true, type: 'company', id, loading: true, data: null, recentNews: [], olderNews: [], newsLoading: false, newsTotal: 0, companyTab: 'overview', discoveredContacts: [], discoveredLoading: false, discoveredDomain: '' };
+            this.detail = { show: true, type: 'company', id, loading: true, data: null, recentNews: [], olderNews: [], newsLoading: false, newsTotal: 0, companyTab: 'overview', discoveredContacts: [], discoveredLoading: false, discoveredDomain: '', scanning: false, scanMessage: '', mergeMode: false, mergeSearch: '', mergeResults: [], merging: false };
             this.editing = { field: null, value: '' };
             window.location.hash = 'companies/' + id;
 
@@ -304,12 +314,10 @@ function crmApp() {
                 });
                 const cutoff = Date.now() - 24 * 60 * 60 * 1000;
                 this.detail.recentNews = items.filter(i => {
-                    const d = i.published_at || i.created_at;
-                    return d && new Date(d).getTime() >= cutoff;
+                    return i.published_at && new Date(i.published_at).getTime() >= cutoff;
                 });
                 this.detail.olderNews = items.filter(i => {
-                    const d = i.published_at || i.created_at;
-                    return !d || new Date(d).getTime() < cutoff;
+                    return !i.published_at || new Date(i.published_at).getTime() < cutoff;
                 });
                 this.detail.newsTotal = data.total || 0;
             }
@@ -464,6 +472,67 @@ function crmApp() {
             }
         },
 
+        async saveCompanyField(field, value) {
+            if (this.detail.data?.company) {
+                await this.apiFetch('companies/' + this.detail.id, {
+                    method: 'PATCH',
+                    body: JSON.stringify({ [field]: value || null }),
+                });
+            }
+        },
+
+        // ==================== SCAN EMAILS ====================
+        async scanCompanyEmails(companyId) {
+            this.detail.scanning = true;
+            this.detail.scanMessage = '';
+            const result = await this.apiFetch('companies/' + companyId + '/scan-emails', {
+                method: 'POST',
+                body: JSON.stringify({}),
+            });
+            if (result) {
+                this.detail.scanMessage = result.message || 'Scan started';
+            } else {
+                this.detail.scanMessage = 'Failed to start scan';
+            }
+            this.detail.scanning = false;
+            setTimeout(() => { this.detail.scanMessage = ''; }, 5000);
+        },
+
+        // ==================== COMPANY MERGE ====================
+        async mergeSearchCompanies(q) {
+            if (!q || q.length < 2) {
+                this.detail.mergeResults = [];
+                return;
+            }
+            const data = await this.apiFetch('search?q=' + encodeURIComponent(q) + '&limit=10');
+            if (data && data.companies) {
+                // Exclude the current company from results
+                this.detail.mergeResults = data.companies.filter(c => c.id !== this.detail.id);
+            }
+        },
+
+        async executeMerge(targetId, sourceId, sourceName) {
+            if (!confirm('Merge "' + sourceName + '" into this company? This will move all people, news, and enrichments. This cannot be undone.')) {
+                return;
+            }
+            this.detail.merging = true;
+            const result = await this.apiFetch('companies/' + targetId + '/merge', {
+                method: 'POST',
+                body: JSON.stringify({ source_id: sourceId }),
+            });
+            if (result && result.status === 'merged') {
+                this.detail.mergeMode = false;
+                this.detail.mergeSearch = '';
+                this.detail.mergeResults = [];
+                // Refresh company detail
+                const data = await this.apiFetch('companies/' + targetId);
+                if (data) this.detail.data = data;
+                // Refresh companies list
+                this.loadCompanies();
+            }
+            this.detail.merging = false;
+        },
+
         // ==================== GLOBAL SEARCH ====================
         async globalSearch(q) {
             if (!q || q.length < 2) {
@@ -476,6 +545,18 @@ function crmApp() {
                 this.searchResults = data;
                 this.showSearchResults = true;
             }
+        },
+
+        // ==================== REPORTS ====================
+        async loadReports() {
+            this.reports.loading = true;
+            const [names, noPeople] = await Promise.all([
+                this.apiFetch('reports/challenging-names'),
+                this.apiFetch('reports/companies-without-people'),
+            ]);
+            if (names) this.reports.challengingNames = names.items || [];
+            if (noPeople) this.reports.companiesWithoutPeople = noPeople.items || [];
+            this.reports.loading = false;
         },
 
         // ==================== OUTREACH ====================

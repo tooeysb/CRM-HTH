@@ -1,6 +1,6 @@
-# Gmail-to-Obsidian Integration
+# CRM-HTH
 
-Automated system to process Gmail history across multiple accounts and create a structured Obsidian vault for knowledge management and relationship tracking.
+Autonomous email processing pipeline that indexes historical Gmail across multiple accounts, extracts themes with AI, and generates an Obsidian vault with relationship intelligence profiles.
 
 ## Features
 
@@ -48,7 +48,7 @@ FastAPI Web Service
 ```bash
 # Clone repository
 git clone <repo-url>
-cd Obsidian
+cd CRM-HTH
 
 # Create virtual environment
 python3.11 -m venv venv
@@ -190,7 +190,7 @@ Once complete, open Obsidian and select:
 ### 1. Create Heroku App
 
 ```bash
-heroku create gmail-obsidian-sync
+heroku create crm-hth
 ```
 
 ### 2. Add Addons

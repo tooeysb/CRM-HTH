@@ -103,15 +103,15 @@ Models (src/models/)
 
 ## Deployment
 
-- **Production**: Heroku (`gmail-obsidian-sync`) with web + worker + monitor dynos
+- **Production**: Heroku (`crm-hth`) with web + worker + monitor dynos
 - **Database**: Supabase PostgreSQL (remote, not local)
 - **Queue**: Redis via Heroku addon
 - **Vault generation**: Local only (Heroku has read-only filesystem)
 
 ```bash
 git push heroku master
-heroku ps:restart worker --app gmail-obsidian-sync
-heroku logs --app gmail-obsidian-sync --dyno worker --tail
+heroku ps:restart worker --app crm-hth
+heroku logs --app crm-hth --dyno worker --tail
 ```
 
 ## Gotchas

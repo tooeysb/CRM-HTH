@@ -116,6 +116,11 @@ class Company(Base, UUIDMixin, TimestampMixin):
         comment="Whether to include in daily news scrape",
     )
 
+    news_search_override: Mapped[str | None] = mapped_column(
+        String(255), nullable=True,
+        comment="Override search term for Google News (e.g. 'DPR Construction' for 'DPR')",
+    )
+
     # Relationships
     user: Mapped["User"] = relationship("User", back_populates="companies")
 
