@@ -3,7 +3,6 @@ Contact matcher for CRM enrichment.
 Matches spreadsheet rows to existing database contacts and creates new ones.
 """
 
-import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from uuid import UUID
@@ -14,7 +13,9 @@ from sqlalchemy.orm import Session
 from src.models.contact import Contact
 from src.models.contact_enrichment import ContactEnrichment
 
-logger = logging.getLogger(__name__)
+from src.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 # Tag assignments by source tab
 _TAB_TAGS: dict[str, list[str]] = {

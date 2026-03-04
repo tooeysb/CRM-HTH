@@ -9,21 +9,25 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
+from src.api.middleware.correlation import CorrelationIdMiddleware
 from src.core.config import settings
+from src.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager."""
     # Startup
-    print(f"🚀 Starting Gmail-to-Obsidian Integration API")
-    print(f"📧 Environment: {settings.app_env}")
-    print(f"🗄️  Database: {settings.supabase_url}")
+    logger.info("Starting Gmail-to-Obsidian Integration API")
+    logger.info("Environment: %s", settings.app_env)
+    logger.info("Database: %s", settings.supabase_url)
 
     yield
 
     # Shutdown
-    print("👋 Shutting down API")
+    logger.info("Shutting down API")
 
 
 # Create FastAPI application
@@ -34,7 +38,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS configuration
+# Middleware (order matters: last added = first executed)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"] if settings.is_development else [settings.app_url],
@@ -42,6 +46,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(CorrelationIdMiddleware)
 
 
 @app.get("/")
@@ -57,12 +62,38 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    """Detailed health check."""
-    return {
-        "status": "healthy",
-        "database": "connected",  # TODO: Add actual DB health check
-        "redis": "connected",  # TODO: Add actual Redis health check
-    }
+    """Detailed health check with real DB and Redis probes."""
+    health: dict = {"status": "healthy"}
+
+    # DB check
+    try:
+        from sqlalchemy import text
+
+        from src.core.database import sync_engine
+
+        with sync_engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        health["database"] = "connected"
+    except Exception:
+        health["database"] = "disconnected"
+        health["status"] = "degraded"
+
+    # Redis check
+    try:
+        import redis as redis_lib
+
+        r = redis_lib.from_url(settings.redis_url, socket_connect_timeout=2)
+        r.ping()
+        r.close()
+        health["redis"] = "connected"
+    except Exception:
+        health["redis"] = "disconnected"
+        health["status"] = "degraded"
+
+    from fastapi.responses import JSONResponse
+
+    status_code = 200 if health["status"] == "healthy" else 503
+    return JSONResponse(content=health, status_code=status_code)
 
 
 # Include routers

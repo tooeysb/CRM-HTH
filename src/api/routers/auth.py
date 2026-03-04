@@ -89,7 +89,7 @@ async def initiate_oauth(
     Returns:
         Authorization URL for user to click
     """
-    logger.info(f"Initiating OAuth for user {user_id}, account {account_label}")
+    logger.info("Initiating OAuth for user %s, account %s", user_id, account_label)
 
     # Validate account label
     valid_labels = ["procore-main", "procore-private", "personal"]
@@ -130,9 +130,9 @@ async def initiate_oauth(
             prompt="consent",
         )
 
-        logger.info(f"Generated auth URL for {account_label}")
+        logger.info("Generated auth URL for %s", account_label)
     except Exception as e:
-        logger.error(f"Error generating auth URL: {str(e)}")
+        logger.error("Error generating auth URL: %s", str(e))
         raise HTTPException(status_code=500, detail="Failed to generate authorization URL")
 
     return AuthUrlResponse(
@@ -170,7 +170,7 @@ async def oauth_callback(
         user_id = state_parts[0]
         account_label = state_parts[1]
 
-        logger.info(f"Processing callback for user {user_id}, account {account_label}")
+        logger.info("Processing callback for user %s, account %s", user_id, account_label)
 
         # Exchange code for credentials
         flow = Flow.from_client_config(
@@ -202,7 +202,7 @@ async def oauth_callback(
             import jwt
             id_token_claims = jwt.decode(credentials.id_token, options={"verify_signature": False})
             account_email = id_token_claims.get("email")
-            logger.info(f"Extracted email from id_token: {account_email}")
+            logger.info("Extracted email from id_token: %s", account_email)
 
         # Fallback to userinfo endpoint if needed
         if not account_email:
@@ -213,7 +213,7 @@ async def oauth_callback(
                 headers={"Authorization": f"Bearer {credentials.token}"}
             )
             userinfo = userinfo_response.json()
-            logger.info(f"Userinfo response: {userinfo}")
+            logger.info("Userinfo response: %s", userinfo)
             account_email = userinfo.get("email")
 
         if not account_email:
@@ -261,7 +261,7 @@ async def oauth_callback(
 
         db.commit()
 
-        logger.info(f"OAuth callback successful for {account_label} ({account_email})")
+        logger.info("OAuth callback successful for %s (%s)", account_label, account_email)
 
         return AuthCallbackResponse(
             status="success",
@@ -271,11 +271,11 @@ async def oauth_callback(
         )
 
     except ValueError as e:
-        logger.error(f"OAuth callback validation error: {str(e)}")
+        logger.error("OAuth callback validation error: %s", str(e))
         raise HTTPException(status_code=400, detail=str(e))
 
     except Exception as e:
-        logger.error(f"OAuth callback error: {str(e)}", exc_info=True)
+        logger.error("OAuth callback error: %s", str(e), exc_info=True)
         raise HTTPException(status_code=500, detail="Authentication failed")
 
 
@@ -293,7 +293,7 @@ async def check_auth_status(
     Returns:
         List of authenticated accounts with status
     """
-    logger.info(f"Checking auth status for user {user_id}")
+    logger.info("Checking auth status for user %s", user_id)
 
     # Get user
     user = db.query(User).filter(User.id == uuid.UUID(user_id)).first()
@@ -315,7 +315,7 @@ async def check_auth_status(
         for account in accounts
     ]
 
-    logger.info(f"Found {len(accounts)} accounts for user {user_id}")
+    logger.info("Found %s accounts for user %s", len(accounts), user_id)
 
     return AuthStatusResponse(
         user_id=user_id,
@@ -341,7 +341,7 @@ async def revoke_account(
     Returns:
         Success status
     """
-    logger.info(f"Revoking credentials for account {account_id}")
+    logger.info("Revoking credentials for account %s", account_id)
 
     # Verify account belongs to user
     account = (
@@ -360,7 +360,7 @@ async def revoke_account(
     auth_service = GmailAuthService()
     try:
         auth_service.revoke_credentials(account_id, db)
-        logger.info(f"Successfully revoked credentials for {account.account_label}")
+        logger.info("Successfully revoked credentials for %s", account.account_label)
 
         return {
             "status": "success",
@@ -368,5 +368,5 @@ async def revoke_account(
         }
 
     except Exception as e:
-        logger.error(f"Error revoking credentials: {str(e)}")
+        logger.error("Error revoking credentials: %s", str(e))
         raise HTTPException(status_code=500, detail="Failed to revoke credentials")

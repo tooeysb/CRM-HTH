@@ -69,10 +69,10 @@ class GmailAuthService:
         Raises:
             ValueError: If account_label is invalid
         """
-        logger.info(f"Generating OAuth URL for user_id={user_id}, account_label={account_label}")
+        logger.info("Generating OAuth URL for user_id=%s, account_label=%s", user_id, account_label)
 
         if account_label not in self.VALID_LABELS:
-            logger.error(f"Invalid account_label: {account_label}")
+            logger.error("Invalid account_label: %s", account_label)
             raise ValueError(
                 f"Invalid account_label '{account_label}'. "
                 f"Must be one of: {', '.join(self.VALID_LABELS)}"
@@ -105,7 +105,7 @@ class GmailAuthService:
             include_granted_scopes="true",
         )
 
-        logger.info(f"Generated OAuth URL successfully for user_id={user_id}")
+        logger.info("Generated OAuth URL successfully for user_id=%s", user_id)
         return auth_url, state_token
 
     async def handle_callback(self, code: str, state: str) -> dict[str, Any]:
@@ -138,7 +138,7 @@ class GmailAuthService:
                 raise ValueError("Invalid state token format")
             _, user_id, account_label = parts
         except (ValueError, IndexError) as e:
-            logger.error(f"Invalid state token format: {e}")
+            logger.error("Invalid state token format: %s", e)
             raise ValueError(f"Invalid state token: {e}")
 
         # Validate account_label
@@ -182,8 +182,10 @@ class GmailAuthService:
         )
 
         logger.info(
-            f"OAuth2 callback processed successfully - "
-            f"account_id={account_id}, email={account_email}, label={account_label}"
+            "OAuth2 callback processed successfully - account_id=%s, email=%s, label=%s",
+            account_id,
+            account_email,
+            account_label,
         )
 
         return {
@@ -207,7 +209,7 @@ class GmailAuthService:
         Raises:
             ValueError: If account not found or credentials missing
         """
-        logger.info(f"Retrieving credentials for account_id={account_id}")
+        logger.info("Retrieving credentials for account_id=%s", account_id)
 
         # Retrieve account from database
         stmt = select(GmailAccount).where(GmailAccount.id == account_id)
@@ -215,11 +217,11 @@ class GmailAuthService:
         account = result.scalar_one_or_none()
 
         if not account:
-            logger.error(f"Gmail account not found: {account_id}")
+            logger.error("Gmail account not found: %s", account_id)
             raise ValueError(f"Gmail account not found: {account_id}")
 
         if not account.credentials:
-            logger.error(f"No credentials stored for account: {account_id}")
+            logger.error("No credentials stored for account: %s", account_id)
             raise ValueError(f"No credentials stored for account: {account_id}")
 
         # Decrypt credentials
@@ -242,11 +244,11 @@ class GmailAuthService:
 
         # Check if token is expired and refresh if needed
         if credentials.expired and credentials.refresh_token:
-            logger.info(f"Token expired for account_id={account_id}, refreshing...")
+            logger.info("Token expired for account_id=%s, refreshing...", account_id)
             credentials.refresh(Request())
             # Update stored credentials with new token
             await self._update_credentials(account_id, credentials)
-            logger.info(f"Token refreshed successfully for account_id={account_id}")
+            logger.info("Token refreshed successfully for account_id=%s", account_id)
 
         return credentials
 

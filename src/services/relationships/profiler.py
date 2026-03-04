@@ -6,7 +6,6 @@ Follows the same API pattern as ThemeBatchProcessor.
 """
 
 import json
-import logging
 from datetime import datetime
 from typing import Any
 from uuid import UUID
@@ -15,11 +14,13 @@ from anthropic import Anthropic
 from sqlalchemy.orm import Session
 
 from src.core.config import settings
+from src.core.logging import get_logger
+from src.core.utils import strip_markdown_codeblocks
 from src.models.email import Email
 from src.models.relationship_profile import RelationshipProfile
 from src.services.relationships.email_sampler import sample_emails
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 RELATIONSHIP_SYSTEM_PROMPT = """You are analyzing email communication between a user and one of their contacts.
 Given a set of representative emails spanning their communication history, generate a detailed relationship profile.
@@ -90,21 +91,10 @@ def profile_contact(
                 break
 
         if not text_content:
-            logger.error(f"No text in Claude response for {contact_info['contact_email']}")
+            logger.error("No text in Claude response for %s", contact_info['contact_email'])
             return _empty_profile()
 
-        # Strip markdown code blocks
-        text_content = text_content.strip()
-        if text_content.startswith("```json"):
-            text_content = text_content[7:]
-            if text_content.endswith("```"):
-                text_content = text_content[:-3]
-            text_content = text_content.strip()
-        elif text_content.startswith("```"):
-            text_content = text_content[3:]
-            if text_content.endswith("```"):
-                text_content = text_content[:-3]
-            text_content = text_content.strip()
+        text_content = strip_markdown_codeblocks(text_content)
 
         profile = json.loads(text_content)
 
@@ -112,10 +102,10 @@ def profile_contact(
         return _validate_profile(profile)
 
     except json.JSONDecodeError as e:
-        logger.error(f"JSON parse error for {contact_info['contact_email']}: {e}")
+        logger.error("JSON parse error for %s: %s", contact_info['contact_email'], e, exc_info=True)
         return _empty_profile()
     except Exception as e:
-        logger.error(f"Claude API error for {contact_info['contact_email']}: {e}")
+        logger.error("Claude API error for %s: %s", contact_info['contact_email'], e, exc_info=True)
         return _empty_profile()
 
 
@@ -146,7 +136,7 @@ def profile_contacts_batch(
     profiled = 0
     skipped = 0
 
-    logger.info(f"Starting relationship profiling for {total} contacts")
+    logger.info("Starting relationship profiling for %s contacts", total)
 
     for idx, contact_info in enumerate(contacts):
         contact_email = contact_info["contact_email"]
@@ -164,13 +154,13 @@ def profile_contacts_batch(
         if existing and existing.profiled_at:
             skipped += 1
             if (idx + 1) % 50 == 0:
-                logger.info(f"Progress: {idx + 1}/{total} (skipped {skipped} already profiled)")
+                logger.info("Progress: %s/%s (skipped %s already profiled)", idx + 1, total, skipped)
             continue
 
         # Sample emails
         emails = sample_emails(contact_email, user_id, db)
         if not emails:
-            logger.warning(f"No emails sampled for {contact_email}, skipping")
+            logger.warning("No emails sampled for %s, skipping", contact_email)
             skipped += 1
             continue
 
@@ -214,14 +204,15 @@ def profile_contacts_batch(
         if profiled % batch_size == 0:
             db.commit()
             logger.info(
-                f"Progress: {idx + 1}/{total} contacts processed "
-                f"({profiled} profiled, {skipped} skipped)"
+                "Progress: %s/%s contacts processed (%s profiled, %s skipped)",
+                idx + 1, total, profiled, skipped
             )
 
     # Final commit
     db.commit()
     logger.info(
-        f"Profiling complete: {profiled} profiled, {skipped} skipped out of {total} contacts"
+        "Profiling complete: %s profiled, %s skipped out of %s contacts",
+        profiled, skipped, total
     )
     return profiled
 
@@ -272,31 +263,6 @@ def _format_user_prompt(contact_info: dict[str, Any], emails: list[Email]) -> st
     return "\n".join(lines)
 
 
-def _validate_profile(profile: dict[str, Any]) -> dict[str, Any]:
-    """Validate and fill defaults for profile fields."""
-    defaults = {
-        "relationship_summary": "",
-        "perceived_opinion": "",
-        "primary_topics": [],
-        "communication_style": "",
-        "notable_events": [],
-        "conflicts": [],
-        "sentiment_trend": "stable",
-        "key_quotes": [],
-    }
-
-    for key, default in defaults.items():
-        if key not in profile:
-            profile[key] = default
-
-    # Validate sentiment_trend
-    valid_trends = {"improving", "stable", "declining", "mixed"}
-    if profile["sentiment_trend"] not in valid_trends:
-        profile["sentiment_trend"] = "stable"
-
-    return profile
-
-
 def _empty_profile() -> dict[str, Any]:
     """Return empty profile for failed processing."""
     return {
@@ -309,3 +275,17 @@ def _empty_profile() -> dict[str, Any]:
         "sentiment_trend": "stable",
         "key_quotes": [],
     }
+
+
+def _validate_profile(profile: dict[str, Any]) -> dict[str, Any]:
+    """Validate and fill defaults for profile fields."""
+    defaults = _empty_profile()
+    for key, default in defaults.items():
+        if key not in profile:
+            profile[key] = default
+
+    valid_trends = {"improving", "stable", "declining", "mixed"}
+    if profile["sentiment_trend"] not in valid_trends:
+        profile["sentiment_trend"] = "stable"
+
+    return profile

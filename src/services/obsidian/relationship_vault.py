@@ -5,7 +5,6 @@ Creates an Obsidian vault with People profiles, Thread notes,
 and Dataview-powered index dashboards.
 """
 
-import logging
 import re
 from collections import defaultdict
 from datetime import datetime
@@ -19,9 +18,12 @@ from sqlalchemy.orm import Session, selectinload
 from src.models.company import Company
 from src.models.contact import Contact
 from src.models.email import Email, EmailTag
+from src.models.email_participant import EmailParticipant
 from src.models.relationship_profile import RelationshipProfile
 
-logger = logging.getLogger(__name__)
+from src.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 class RelationshipVaultGenerator:
@@ -44,7 +46,7 @@ class RelationshipVaultGenerator:
         Returns:
             Stats dict with counts of generated files.
         """
-        logger.info(f"Generating relationship vault at {self.vault_path}")
+        logger.info("Generating relationship vault at %s", self.vault_path)
 
         # Create directories
         self.people_dir.mkdir(parents=True, exist_ok=True)
@@ -62,7 +64,7 @@ class RelationshipVaultGenerator:
             .all()
         )
 
-        logger.info(f"Generating notes for {len(profiles)} profiled contacts")
+        logger.info("Generating notes for %s profiled contacts", len(profiles))
 
         # Bulk-load contacts and companies for CRM enrichment in person notes
         contact_emails = [p.contact_email for p in profiles]
@@ -95,19 +97,19 @@ class RelationshipVaultGenerator:
             self._generate_person_note(profile, contact, company)
             stats["people"] += 1
 
-        logger.info(f"Generated {stats['people']} People notes")
+        logger.info("Generated %s People notes", stats['people'])
 
         # Generate Thread notes for profiled contacts
         thread_count = self._generate_thread_notes(user_id, profiles, db)
         stats["threads"] = thread_count
 
-        logger.info(f"Generated {stats['threads']} Thread notes")
+        logger.info("Generated %s Thread notes", stats['threads'])
 
         # Generate Index dashboards
         self._generate_indexes(profiles)
         stats["indexes"] = 5
 
-        logger.info(f"Vault generation complete: {stats}")
+        logger.info("Vault generation complete: %s", stats)
         return stats
 
     def _generate_person_note(
@@ -311,25 +313,54 @@ class RelationshipVaultGenerator:
             p.contact_email: (p.contact_name or p.contact_email) for p in profiles
         }
 
-        # Find all threads involving these contacts
-        thread_ids_query = (
+        # Find threads involving these contacts.
+        # 1) Threads where a contact was the sender (indexed, fast).
+        sender_thread_ids = (
             db.query(Email.gmail_thread_id)
             .filter(
                 Email.user_id == user_id,
                 Email.gmail_thread_id.isnot(None),
-                (
-                    func.lower(Email.sender_email).in_(contact_emails)
-                    | func.lower(Email.recipient_emails).op("~*")(
-                        "|".join(re.escape(e) for e in contact_emails)
-                    )
-                ),
+                func.lower(Email.sender_email).in_(contact_emails),
             )
             .distinct()
             .all()
         )
 
+        # 2) Threads where a contact was a recipient — use EmailParticipant
+        #    if populated, avoiding an O(n*m) regex scan on recipient_emails.
+        ep_count = db.query(func.count(EmailParticipant.id)).scalar() or 0
+        if ep_count > 0:
+            contact_id_subq = (
+                db.query(Contact.id)
+                .filter(Contact.user_id == user_id, Contact.email.in_(contact_emails))
+                .subquery()
+            )
+            ep_thread_ids = (
+                db.query(Email.gmail_thread_id)
+                .join(EmailParticipant, EmailParticipant.email_id == Email.id)
+                .filter(
+                    Email.user_id == user_id,
+                    Email.gmail_thread_id.isnot(None),
+                    EmailParticipant.contact_id.in_(
+                        db.query(contact_id_subq.c.id)
+                    ),
+                )
+                .distinct()
+                .all()
+            )
+        else:
+            ep_thread_ids = []
+
+        # Merge both sets of thread IDs
+        thread_ids_query = list(
+            {row[0] for row in sender_thread_ids}
+            | {row[0] for row in ep_thread_ids}
+        )
+        # Convert back to list-of-tuples format expected below
+        thread_ids_query = [(tid,) for tid in thread_ids_query]
+
         thread_ids = [row[0] for row in thread_ids_query]
-        logger.info(f"Found {len(thread_ids)} threads to generate")
+        logger.info("Found %s threads to generate", len(thread_ids))
 
         count = 0
         # Process threads in batches to manage memory
@@ -363,7 +394,7 @@ class RelationshipVaultGenerator:
                 count += 1
 
             if batch_start + batch_size < len(thread_ids):
-                logger.info(f"Thread generation progress: {count}/{len(thread_ids)}")
+                logger.info("Thread generation progress: %s/%s", count, len(thread_ids))
 
         return count
 

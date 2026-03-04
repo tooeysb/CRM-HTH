@@ -17,19 +17,14 @@ import uuid
 from datetime import datetime, timedelta
 
 from celery import chain, group
-from sqlalchemy import create_engine, func
+from sqlalchemy import func
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.orm import sessionmaker
 
-from src.core.config import settings
+from src.core.database import WorkerSessionLocal as SessionLocal
 from src.core.logging import get_logger
 from src.integrations.gmail.client import GmailClient
 from src.models import Email, EmailQueue, GmailAccount
 from src.worker.celery_app import celery_app
-
-# Database setup
-engine = create_engine(settings.database_url)
-SessionLocal = sessionmaker(bind=engine)
 
 logger = get_logger(__name__)
 
@@ -64,8 +59,11 @@ def _process_id_batch(db, account, batch_ids, task_id):
     new_ids = [msg_id for msg_id in batch_ids if msg_id not in existing_ids]
 
     logger.info(
-        f"[{task_id}] [{account.account_email}] "
-        f"Batch: {len(existing_ids)} already fetched, {len(new_ids)} new IDs to queue"
+        "[%s] [%s] Batch: %s already fetched, %s new IDs to queue",
+        task_id,
+        account.account_email,
+        len(existing_ids),
+        len(new_ids),
     )
 
     # Insert new IDs into EmailQueue
@@ -90,14 +88,20 @@ def _process_id_batch(db, account, batch_ids, task_id):
             db.commit()
 
         logger.info(
-            f"[{task_id}] [{account.account_email}] Queued {len(new_ids)} message IDs"
+            "[%s] [%s] Queued %s message IDs",
+            task_id,
+            account.account_email,
+            len(new_ids),
         )
 
         # Spawn Phase 2 workers immediately (up to 10 concurrent workers)
         num_workers = min(10, (len(new_ids) + BATCH_SIZE - 1) // BATCH_SIZE)
         if num_workers > 0:
             logger.info(
-                f"[{task_id}] [{account.account_email}] Spawning {num_workers} Phase 2 workers"
+                "[%s] [%s] Spawning %s Phase 2 workers",
+                task_id,
+                account.account_email,
+                num_workers,
             )
             tasks = [fetch_message_batch.s(str(account.id)) for _ in range(num_workers)]
             job = group(tasks)
@@ -117,7 +121,7 @@ def fetch_all_message_ids(user_id: str, account_label: str = None):
         account_label: Optional account label filter
     """
     task_id = str(uuid.uuid4())[:8]
-    logger.info(f"[{task_id}] Starting ID fetch for user {user_id}")
+    logger.info("[%s] Starting ID fetch for user %s", task_id, user_id)
 
     db = SessionLocal()
     try:
@@ -133,12 +137,15 @@ def fetch_all_message_ids(user_id: str, account_label: str = None):
         accounts = query.all()
 
         if not accounts:
-            logger.warning(f"[{task_id}] No active accounts found")
+            logger.warning("[%s] No active accounts found", task_id)
             return
 
         for account in accounts:
             logger.info(
-                f"[{task_id}] Fetching IDs for {account.account_email} ({account.account_label})"
+                "[%s] Fetching IDs for %s (%s)",
+                task_id,
+                account.account_email,
+                account.account_label,
             )
 
             # Create Gmail client
@@ -167,15 +174,21 @@ def fetch_all_message_ids(user_id: str, account_label: str = None):
                         page_count += 1
 
                         logger.info(
-                            f"[{task_id}] [{account.account_email}] Fetched page {page_count}: "
-                            f"{len(message_ids)} IDs (total: {total_ids_collected})"
+                            "[%s] [%s] Fetched page %s: %s IDs (total: %s)",
+                            task_id,
+                            account.account_email,
+                            page_count,
+                            len(message_ids),
+                            total_ids_collected,
                         )
 
                         # Process batch incrementally every QUEUE_BATCH_SIZE IDs
                         if len(current_batch) >= QUEUE_BATCH_SIZE:
                             logger.info(
-                                f"[{task_id}] [{account.account_email}] "
-                                f"Processing batch of {len(current_batch)} IDs"
+                                "[%s] [%s] Processing batch of %s IDs",
+                                task_id,
+                                account.account_email,
+                                len(current_batch),
                             )
                             _process_id_batch(db, account, current_batch, task_id)
                             current_batch = []  # Clear buffer
@@ -187,20 +200,24 @@ def fetch_all_message_ids(user_id: str, account_label: str = None):
                     time.sleep(0.5)
 
                 except Exception as e:
-                    logger.error(f"[{task_id}] Error fetching IDs: {e}")
+                    logger.error("[%s] Error fetching IDs: %s", task_id, e)
                     break
 
             # Process any remaining IDs
             if current_batch:
                 logger.info(
-                    f"[{task_id}] [{account.account_email}] "
-                    f"Processing final batch of {len(current_batch)} IDs"
+                    "[%s] [%s] Processing final batch of %s IDs",
+                    task_id,
+                    account.account_email,
+                    len(current_batch),
                 )
                 _process_id_batch(db, account, current_batch, task_id)
 
             logger.info(
-                f"[{task_id}] [{account.account_email}] "
-                f"Completed: Fetched {total_ids_collected} total message IDs"
+                "[%s] [%s] Completed: Fetched %s total message IDs",
+                task_id,
+                account.account_email,
+                total_ids_collected,
             )
     finally:
         db.close()
@@ -216,7 +233,7 @@ def fetch_message_batch(account_id: str):
     task_id = str(uuid.uuid4())[:8]
     worker_id = f"{celery_app.current_task.request.id}"
 
-    logger.info(f"[{task_id}] Worker {worker_id} claiming batch for account {account_id}")
+    logger.info("[%s] Worker %s claiming batch for account %s", task_id, worker_id, account_id)
 
     db = SessionLocal()
     try:
@@ -224,7 +241,7 @@ def fetch_message_batch(account_id: str):
         account = db.query(GmailAccount).filter(GmailAccount.id == account_id).first()
 
         if not account:
-            logger.error(f"[{task_id}] Account {account_id} not found")
+            logger.error("[%s] Account %s not found", task_id, account_id)
             return
 
         # Unclaim stale IDs (older than 15 minutes) to recover from worker crashes
@@ -241,7 +258,10 @@ def fetch_message_batch(account_id: str):
         if stale_count > 0:
             db.commit()
             logger.info(
-                f"[{task_id}] [{account.account_email}] Unclaimed {stale_count} stale IDs"
+                "[%s] [%s] Unclaimed %s stale IDs",
+                task_id,
+                account.account_email,
+                stale_count,
             )
 
         # Claim a batch of unclaimed IDs (atomically)
@@ -258,7 +278,7 @@ def fetch_message_batch(account_id: str):
         )
 
         if not claim_result:
-            logger.info(f"[{task_id}] No unclaimed IDs available")
+            logger.info("[%s] No unclaimed IDs available", task_id)
             return
 
         # Mark as claimed
@@ -268,7 +288,7 @@ def fetch_message_batch(account_id: str):
         )
         db.commit()
 
-        logger.info(f"[{task_id}] Claimed {len(claimed_ids)} IDs")
+        logger.info("[%s] Claimed %s IDs", task_id, len(claimed_ids))
 
         # Fetch full messages
         creds = json.loads(account.credentials)
@@ -276,7 +296,7 @@ def fetch_message_batch(account_id: str):
 
         try:
             email_dicts = gmail_client.fetch_message_batch(claimed_ids, format="full")
-            logger.info(f"[{task_id}] Fetched {len(email_dicts)} full messages")
+            logger.info("[%s] Fetched %s full messages", task_id, len(email_dicts))
 
             # Insert into Email table
             emails_to_insert = []
@@ -316,7 +336,7 @@ def fetch_message_batch(account_id: str):
                 db.execute(stmt, emails_to_insert)
                 db.commit()
 
-                logger.info(f"[{task_id}] Inserted {len(emails_to_insert)} emails")
+                logger.info("[%s] Inserted %s emails", task_id, len(emails_to_insert))
 
             # Remove from queue
             db.query(EmailQueue).filter(EmailQueue.id.in_([r.id for r in claim_result])).delete(
@@ -324,10 +344,10 @@ def fetch_message_batch(account_id: str):
             )
             db.commit()
 
-            logger.info(f"[{task_id}] Removed {len(claim_result)} IDs from queue")
+            logger.info("[%s] Removed %s IDs from queue", task_id, len(claim_result))
 
         except Exception as e:
-            logger.error(f"[{task_id}] Error fetching messages: {e}")
+            logger.error("[%s] Error fetching messages: %s", task_id, e)
             # Rollback failed transaction before attempting unclaim
             db.rollback()
             # Unclaim on error so another worker can retry
@@ -351,9 +371,9 @@ def fetch_message_batch(account_id: str):
             )
 
             if remaining > 0:
-                logger.info(f"[{task_id}] {remaining} IDs remaining, spawning another task")
+                logger.info("[%s] %s IDs remaining, spawning another task", task_id, remaining)
                 fetch_message_batch.delay(account_id)
         except Exception as e:
-            logger.error(f"[{task_id}] Error spawning next task: {e}")
+            logger.error("[%s] Error spawning next task: %s", task_id, e)
     finally:
         db.close()

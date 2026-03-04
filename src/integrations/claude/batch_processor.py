@@ -4,7 +4,6 @@ Uses Batch API with prompt caching for 90%+ cost savings.
 """
 
 import json
-import logging
 import time
 from datetime import datetime
 from typing import Any
@@ -13,12 +12,13 @@ from anthropic import Anthropic
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from src.core.config import settings
+from src.core.logging import get_logger
 from src.services.theme_detection.prompt_template import (
     SYSTEM_PROMPT,
     generate_user_prompt,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class ThemeBatchProcessor:
@@ -64,7 +64,7 @@ class ThemeBatchProcessor:
         if not emails:
             raise ValueError("Cannot submit empty batch")
 
-        logger.info(f"Preparing batch of {len(emails)} emails for Claude Batch API")
+        logger.info("Preparing batch of %d emails for Claude Batch API", len(emails))
 
         # Build batch requests
         requests = []
@@ -119,14 +119,15 @@ class ThemeBatchProcessor:
             batch_id = batch_response.id
 
             logger.info(
-                f"Batch submitted successfully. Batch ID: {batch_id}, "
-                f"Status: {batch_response.processing_status}"
+                "Batch submitted successfully. Batch ID: %s, Status: %s",
+                batch_id,
+                batch_response.processing_status,
             )
 
             return batch_id
 
         except Exception as e:
-            logger.error(f"Failed to submit batch: {e}")
+            logger.error("Failed to submit batch: %s", e)
             raise
 
     @retry(
@@ -163,7 +164,7 @@ class ThemeBatchProcessor:
             TimeoutError: If batch doesn't complete within retry limit
             Exception: If batch processing fails
         """
-        logger.info(f"Polling batch {batch_id} for results...")
+        logger.info("Polling batch %s for results...", batch_id)
 
         # Retrieve batch status
         batch = self.client.beta.messages.batches.retrieve(batch_id)
@@ -185,16 +186,20 @@ class ThemeBatchProcessor:
             progress_pct = (completed / total * 100) if total > 0 else 0
 
             logger.info(
-                f"Batch {batch_id} still processing: "
-                f"{completed}/{total} complete ({progress_pct:.1f}%)"
+                "Batch %s still processing: %d/%d complete (%.1f%%)",
+                batch_id,
+                completed,
+                total,
+                progress_pct,
             )
             raise Exception("Batch still processing")  # Trigger retry
 
         elif status == "ended":
             logger.info(
-                f"Batch {batch_id} completed. "
-                f"Succeeded: {batch.request_counts.succeeded}, "
-                f"Errored: {batch.request_counts.errored}"
+                "Batch %s completed. Succeeded: %d, Errored: %d",
+                batch_id,
+                batch.request_counts.succeeded,
+                batch.request_counts.errored,
             )
 
             # Retrieve all results
@@ -207,21 +212,21 @@ class ThemeBatchProcessor:
                         themes = self.parse_themes(result.result.message)
                         results[email_id] = themes
                     except Exception as e:
-                        logger.error(f"Failed to parse themes for email {email_id}: {e}")
+                        logger.error("Failed to parse themes for email %s: %s", email_id, e)
                         results[email_id] = self._empty_themes()
                 else:
                     # Handle error result
                     error_type = getattr(result.result, "type", "unknown")
                     # Log full error object to understand structure
-                    logger.error(f"Email {email_id} processing failed with type: {error_type}")
-                    logger.error(f"Full error object: {result.result}")
+                    logger.error("Email %s processing failed with type: %s", email_id, error_type)
+                    logger.error("Full error object: %s", result.result)
                     results[email_id] = self._empty_themes()
 
             return results
 
         else:
             # canceled, expired, or unknown status
-            logger.error(f"Batch {batch_id} ended with unexpected status: {status}")
+            logger.error("Batch %s ended with unexpected status: %s", batch_id, status)
             raise Exception(f"Batch processing failed with status: {status}")
 
     def parse_themes(self, message: Any) -> dict[str, Any]:
@@ -271,7 +276,7 @@ class ThemeBatchProcessor:
         try:
             themes = json.loads(text_content)
         except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse JSON response: {text_content}")
+            logger.error("Failed to parse JSON response: %s", text_content)
             raise ValueError(f"Invalid JSON response from Claude: {e}")
 
         # Validate required fields
@@ -286,7 +291,7 @@ class ThemeBatchProcessor:
 
         missing = required_fields - set(themes.keys())
         if missing:
-            logger.warning(f"Missing fields in theme response: {missing}")
+            logger.warning("Missing fields in theme response: %s", missing)
             # Fill in missing fields with defaults
             for field in missing:
                 if field in ["explicit_topics", "implicit_interests", "action_items", "domains"]:
@@ -324,7 +329,7 @@ class ThemeBatchProcessor:
         Returns:
             Dictionary mapping email_id → parsed themes
         """
-        logger.info(f"Processing {len(emails)} emails synchronously (immediate mode)")
+        logger.info("Processing %d emails synchronously (immediate mode)", len(emails))
 
         results = {}
 
@@ -373,11 +378,11 @@ class ThemeBatchProcessor:
                 themes = self.parse_themes(message)
                 results[email_id] = themes
 
-                logger.info(f"Processed email {idx + 1}/{len(emails)}: {email_id}")
+                logger.info("Processed email %d/%d: %s", idx + 1, len(emails), email_id)
 
             except Exception as e:
-                logger.error(f"Failed to process email {email_id}: {e}")
+                logger.error("Failed to process email %s: %s", email_id, e)
                 results[email_id] = self._empty_themes()
 
-        logger.info(f"Synchronous processing complete. {len(results)} emails processed.")
+        logger.info("Synchronous processing complete. %d emails processed.", len(results))
         return results

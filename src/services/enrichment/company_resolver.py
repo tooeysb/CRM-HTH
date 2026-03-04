@@ -3,7 +3,6 @@ Company resolver for CRM enrichment.
 Resolves and deduplicates company records from multi-tab spreadsheet data.
 """
 
-import logging
 import re
 from decimal import Decimal, InvalidOperation
 from uuid import UUID
@@ -11,9 +10,11 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from src.core.logging import get_logger
+from src.core.utils import GENERIC_EMAIL_DOMAINS
 from src.models.company import Company
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Suffixes to strip during normalization
 _STRIP_SUFFIXES = [
@@ -251,25 +252,7 @@ class CompanyResolver:
     @staticmethod
     def _is_generic_domain(domain: str) -> bool:
         """Check if a domain is a generic email provider (not company-specific)."""
-        generic = {
-            "gmail.com",
-            "yahoo.com",
-            "hotmail.com",
-            "outlook.com",
-            "aol.com",
-            "icloud.com",
-            "me.com",
-            "live.com",
-            "msn.com",
-            "protonmail.com",
-            "mail.com",
-            "comcast.net",
-            "att.net",
-            "verizon.net",
-            "sbcglobal.net",
-            "cox.net",
-        }
-        return domain in generic
+        return domain in GENERIC_EMAIL_DOMAINS
 
     @staticmethod
     def _parse_arr(value: str | None) -> Decimal | None:

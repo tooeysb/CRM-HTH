@@ -102,7 +102,8 @@ class GmailRateLimiter:
             "retry_on_error": [redis.ConnectionError, redis.TimeoutError],
         }
 
-        # Add SSL configuration for rediss:// URLs (Heroku Redis)
+        # Heroku Redis uses self-signed certs and does not provide CA certs for
+        # verification. CERT_NONE is the documented Heroku Redis pattern.
         if self.redis_url.startswith("rediss://"):
             connection_params["ssl_cert_reqs"] = ssl.CERT_NONE
 

@@ -14,7 +14,6 @@ Run as: python -m src.monitoring.autonomous_guardian
 """
 
 import asyncio
-import logging
 import os
 import subprocess
 import time
@@ -26,13 +25,10 @@ from sqlalchemy import create_engine, func
 from sqlalchemy.orm import sessionmaker
 
 from src.core.config import settings
+from src.core.logging import get_logger
 from src.models import Email, GuardianEvent, SyncJob
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class ScanGuardian:
@@ -71,7 +67,7 @@ class ScanGuardian:
             db.add(event)
             db.commit()
         except Exception as e:
-            logger.error(f"Failed to log guardian event: {e}")
+            logger.error("Failed to log guardian event: %s", e)
             db.rollback()
         finally:
             db.close()
@@ -125,7 +121,7 @@ class ScanGuardian:
         if job.updated_at:
             minutes_since_update = (now - job.updated_at).total_seconds() / 60
             if minutes_since_update > (self.stuck_threshold / 60):
-                return True, f"Job hasn't updated in {minutes_since_update:.1f} minutes"
+                return True, "Job hasn't updated in %.1f minutes" % minutes_since_update
 
         return False, "Job is progressing normally"
 
@@ -157,8 +153,8 @@ class ScanGuardian:
             return False, "Worker logs look healthy"
 
         except Exception as e:
-            logger.warning(f"Failed to check worker logs: {e}")
-            return False, f"Could not check logs: {e}"
+            logger.warning("Failed to check worker logs: %s", e)
+            return False, "Could not check logs: %s" % e
 
     def kill_stuck_job(self, job_id: str) -> bool:
         """Kill a stuck scan job."""
@@ -170,7 +166,7 @@ class ScanGuardian:
                 job.error_message = "Auto-killed by guardian: Job was stuck with no progress"
                 job.updated_at = datetime.now()
                 db.commit()
-                logger.info(f"Killed stuck job {job_id}")
+                logger.info("Killed stuck job %s", job_id)
                 return True
             return False
         finally:
@@ -192,14 +188,14 @@ class ScanGuardian:
                 if response.status_code == 200:
                     data = response.json()
                     job_id = data.get("job_id")
-                    logger.info(f"Started new scan job: {job_id}")
+                    logger.info("Started new scan job: %s", job_id)
                     return job_id
                 else:
-                    logger.error(f"Failed to start scan: {response.status_code} - {response.text}")
+                    logger.error("Failed to start scan: %s - %s", response.status_code, response.text)
                     return None
 
         except Exception as e:
-            logger.error(f"Error starting scan: {e}")
+            logger.error("Error starting scan: %s", e)
             return None
 
     async def auto_fix_and_restart(self, reason: str):
@@ -211,7 +207,7 @@ class ScanGuardian:
         2. Check and adjust rate limits if needed
         3. Restart scan
         """
-        logger.warning(f"🔧 AUTO-FIX TRIGGERED: {reason}")
+        logger.warning("🔧 AUTO-FIX TRIGGERED: %s", reason)
 
         # Check if we've restarted too many times recently
         if self.last_fix_time:
@@ -220,8 +216,9 @@ class ScanGuardian:
                 self.restart_count += 1
                 if self.restart_count >= self.max_auto_restarts:
                     logger.error(
-                        f"❌ TOO MANY AUTO-RESTARTS ({self.restart_count}) in short time. "
-                        f"Pausing auto-fix. Manual intervention needed."
+                        "❌ TOO MANY AUTO-RESTARTS (%s) in short time. "
+                        "Pausing auto-fix. Manual intervention needed.",
+                        self.restart_count
                     )
                     return
             else:
@@ -234,7 +231,7 @@ class ScanGuardian:
         status = self.get_scan_status()
         if status["running_job"]:
             job_id = str(status["running_job"].id)
-            logger.info(f"Killing stuck job {job_id}")
+            logger.info("Killing stuck job %s", job_id)
             self.kill_stuck_job(job_id)
 
             # Log job kill event
@@ -254,7 +251,7 @@ class ScanGuardian:
         job_id = await self.start_new_scan()
 
         if job_id:
-            logger.info(f"✅ AUTO-FIX COMPLETE: New scan started with job {job_id}")
+            logger.info("✅ AUTO-FIX COMPLETE: New scan started with job %s", job_id)
             self.restart_count += 1
 
             # Log scan restart event
@@ -276,10 +273,10 @@ class ScanGuardian:
     async def monitor_loop(self):
         """Main monitoring loop."""
         logger.info("🛡️  Autonomous Gmail Scan Guardian started")
-        logger.info(f"Check interval: {self.check_interval}s")
-        logger.info(f"Stuck threshold: {self.stuck_threshold}s")
-        logger.info(f"Max auto-restarts: {self.max_auto_restarts}")
-        logger.info(f"Monitoring: {self.api_url}")
+        logger.info("Check interval: %ss", self.check_interval)
+        logger.info("Stuck threshold: %ss", self.stuck_threshold)
+        logger.info("Max auto-restarts: %s", self.max_auto_restarts)
+        logger.info("Monitoring: %s", self.api_url)
 
         while True:
             try:
@@ -290,7 +287,7 @@ class ScanGuardian:
                 is_stuck, reason = self.is_scan_stuck(status)
 
                 if is_stuck:
-                    logger.warning(f"⚠️  STUCK SCAN DETECTED: {reason}")
+                    logger.warning("⚠️  STUCK SCAN DETECTED: %s", reason)
 
                     # Log stuck detection event
                     job_id = str(status["running_job"].id) if status["running_job"] else None
@@ -304,7 +301,7 @@ class ScanGuardian:
                     # Check worker logs for additional context
                     has_errors, log_summary = self.check_worker_logs()
                     if has_errors:
-                        logger.warning(f"📋 Worker logs: {log_summary}")
+                        logger.warning("📋 Worker logs: %s", log_summary)
 
                     # Auto-fix and restart
                     await self.auto_fix_and_restart(reason)
@@ -314,18 +311,22 @@ class ScanGuardian:
                     if status["running_job"]:
                         job = status["running_job"]
                         logger.info(
-                            f"✅ Scan healthy - Job {str(job.id)[:8]}... "
-                            f"({job.progress_pct}% complete, "
-                            f"{job.emails_processed} emails processed)"
+                            "✅ Scan healthy - Job %s... "
+                            "(%s%% complete, "
+                            "%s emails processed)",
+                            str(job.id)[:8],
+                            job.progress_pct,
+                            job.emails_processed
                         )
                     else:
                         logger.info(
-                            f"ℹ️  No active scan - "
-                            f"{status['total_emails']} total emails in database"
+                            "ℹ️  No active scan - "
+                            "%s total emails in database",
+                            status['total_emails']
                         )
 
             except Exception as e:
-                logger.error(f"Error in monitor loop: {e}", exc_info=True)
+                logger.error("Error in monitor loop: %s", e, exc_info=True)
 
             # Wait for next check
             await asyncio.sleep(self.check_interval)

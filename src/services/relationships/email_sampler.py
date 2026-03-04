@@ -5,16 +5,16 @@ Selects representative emails across categories to give Claude a diverse view
 of each contact relationship. Uses SQL queries on existing email data.
 """
 
-import logging
 import random
 from uuid import UUID
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
 
+from src.core.logging import get_logger
 from src.models.email import Email, EmailTag
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def sample_emails(
@@ -58,7 +58,7 @@ def sample_emails(
 
     total_available = base_q.count()
     if total_available == 0:
-        logger.warning(f"No emails found for contact {contact_email}")
+        logger.warning("No emails found for contact %s", contact_email)
         return []
 
     # If total emails <= max_samples, return all

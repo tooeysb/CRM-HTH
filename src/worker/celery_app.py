@@ -6,6 +6,9 @@ import ssl
 from celery import Celery
 
 from src.core.config import settings
+from src.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 # Create Celery app
 celery_app = Celery(
@@ -32,7 +35,8 @@ config = {
     "result_expires": 3600 * 24,  # Results expire after 24 hours
 }
 
-# Only add SSL config if using rediss:// (production/Heroku)
+# Heroku Redis uses self-signed certs and does not provide CA certs for
+# verification. CERT_NONE is the documented Heroku Redis pattern.
 if settings.redis_url.startswith("rediss://"):
     config["broker_use_ssl"] = {"ssl_cert_reqs": ssl.CERT_NONE}
     config["redis_backend_use_ssl"] = {"ssl_cert_reqs": ssl.CERT_NONE}
@@ -43,5 +47,5 @@ celery_app.conf.update(config)
 @celery_app.task(bind=True)
 def debug_task(self):
     """Debug task to test Celery is working."""
-    print(f"Request: {self.request!r}")
+    logger.debug("Request: %r", self.request)
     return {"status": "ok", "message": "Celery is working!"}

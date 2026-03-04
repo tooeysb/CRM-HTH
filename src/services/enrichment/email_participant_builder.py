@@ -3,7 +3,6 @@ Email participant builder for CRM enrichment.
 Bulk-populates the EmailParticipant junction table from existing emails and contacts.
 """
 
-import logging
 import re
 import uuid as uuid_mod
 from uuid import UUID
@@ -16,7 +15,9 @@ from src.models.contact import Contact
 from src.models.email import Email
 from src.models.email_participant import EmailParticipant
 
-logger = logging.getLogger(__name__)
+from src.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 # Regex to extract email from "Name <email>" format
 _EMAIL_BRACKET_RE = re.compile(r"<([^>]+)>")

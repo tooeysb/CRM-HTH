@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from src.core.config import settings
 from src.core.logging import get_logger
+from src.core.utils import strip_markdown_codeblocks
 from src.models import Email, EmailTag, GmailAccount
 from src.models.voice_profile import VoiceProfile
 from src.services.voice.draft_prompt import (
@@ -50,7 +51,7 @@ class VoiceProfileGenerator:
         Returns:
             Created or updated VoiceProfile
         """
-        logger.info(f"Generating voice profile '{profile_name}' for user {user_id}")
+        logger.info("Generating voice profile '%s' for user %s", profile_name, user_id)
 
         # Get user's email addresses
         accounts = (
@@ -66,7 +67,7 @@ class VoiceProfileGenerator:
         if not user_emails:
             raise ValueError(f"No active accounts found for user {user_id}")
 
-        logger.info(f"User email addresses: {user_emails}")
+        logger.info("User email addresses: %s", user_emails)
 
         # Fetch sent emails with body content
         sent_emails = self._fetch_sent_emails(user_id, user_emails, sample_size)
@@ -74,7 +75,7 @@ class VoiceProfileGenerator:
         if not sent_emails:
             raise ValueError("No sent emails with body content found. Run body backfill first.")
 
-        logger.info(f"Found {len(sent_emails)} sent emails for analysis")
+        logger.info("Found %s sent emails for analysis", len(sent_emails))
 
         # Analyze in batches (Claude has context limits)
         profile_data = self._analyze_emails(sent_emails)
@@ -83,7 +84,7 @@ class VoiceProfileGenerator:
         profile = self._save_profile(user_id, profile_name, profile_data, len(sent_emails))
 
         logger.info(
-            f"Voice profile '{profile_name}' generated with {len(sent_emails)} samples"
+            "Voice profile '%s' generated with %s samples", profile_name, len(sent_emails)
         )
 
         return profile
@@ -99,20 +100,39 @@ class VoiceProfileGenerator:
 
         Samples strategically across recipients, time periods, and topics.
         """
-        # Get sent emails with body
-        query = (
-            self.db.query(Email)
+        # Get sent emails with body using probabilistic sampling.
+        # Using random() < threshold in WHERE is O(n) scan, much faster than
+        # ORDER BY random() which is O(n log n) sort on the full result set.
+        total = (
+            self.db.query(func.count(Email.id))
             .filter(
                 Email.user_id == user_id,
                 Email.sender_email.in_(user_emails),
                 Email.body != None,  # noqa: E711
                 Email.body != "",
             )
-            .order_by(func.random())
-            .limit(sample_size)
+            .scalar()
+            or 0
         )
 
-        emails = query.all()
+        base_filter = [
+            Email.user_id == user_id,
+            Email.sender_email.in_(user_emails),
+            Email.body != None,  # noqa: E711
+            Email.body != "",
+        ]
+
+        if total <= sample_size:
+            emails = self.db.query(Email).filter(*base_filter).all()
+        else:
+            # Over-sample by 2x then truncate to handle variance in random()
+            ratio = min(1.0, (sample_size * 2) / total)
+            emails = (
+                self.db.query(Email)
+                .filter(*base_filter, func.random() < ratio)
+                .limit(sample_size)
+                .all()
+            )
 
         return [
             {
@@ -148,8 +168,10 @@ class VoiceProfileGenerator:
             )
 
             logger.info(
-                f"Analyzing batch {i // batch_size + 1} "
-                f"({len(batch)} emails, ~{len(user_prompt)} chars)"
+                "Analyzing batch %s (%s emails, ~%s chars)",
+                i // batch_size + 1,
+                len(batch),
+                len(user_prompt),
             )
 
             message = self.client.messages.create(
@@ -172,15 +194,7 @@ class VoiceProfileGenerator:
                     text_content = block.text
                     break
 
-            # Strip markdown code blocks
-            text_content = text_content.strip()
-            if text_content.startswith("```json"):
-                text_content = text_content[7:]
-            elif text_content.startswith("```"):
-                text_content = text_content[3:]
-            if text_content.endswith("```"):
-                text_content = text_content[:-3]
-            text_content = text_content.strip()
+            text_content = strip_markdown_codeblocks(text_content)
 
             profile_data = json.loads(text_content)
             batch_profiles.append(profile_data)
@@ -226,15 +240,9 @@ class VoiceProfileGenerator:
                 text_content = block.text
                 break
 
-        text_content = text_content.strip()
-        if text_content.startswith("```json"):
-            text_content = text_content[7:]
-        elif text_content.startswith("```"):
-            text_content = text_content[3:]
-        if text_content.endswith("```"):
-            text_content = text_content[:-3]
+        text_content = strip_markdown_codeblocks(text_content)
 
-        return json.loads(text_content.strip())
+        return json.loads(text_content)
 
     def _save_profile(
         self,

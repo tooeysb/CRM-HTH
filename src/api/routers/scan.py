@@ -74,12 +74,12 @@ async def start_scan(
     Returns:
         Job ID and status URL for monitoring
     """
-    logger.info(f"Starting scan for user {request.user_id}, accounts: {request.account_labels}")
+    logger.info("Starting scan for user %s, accounts: %s", request.user_id, request.account_labels)
 
     # Validate user exists
     user = db.query(User).filter(User.id == uuid.UUID(request.user_id)).first()
     if not user:
-        raise HTTPException(status_code=404, detail=f"User {request.user_id} not found")
+        raise HTTPException(status_code=404, detail="User not found")
 
     # Default to all 3 accounts if not specified
     account_labels = request.account_labels or ["procore-main", "procore-private", "personal"]
@@ -114,7 +114,7 @@ async def start_scan(
     )
 
     if existing_job:
-        logger.warning(f"Job already running for user {request.user_id}: {existing_job.id}")
+        logger.warning("Job already running for user %s: %s", request.user_id, existing_job.id)
         raise HTTPException(
             status_code=409,
             detail=f"A scan is already running for this user. Job ID: {existing_job.id}",
@@ -123,7 +123,7 @@ async def start_scan(
     # Enqueue Celery task
     try:
         task = scan_gmail_task.delay(request.user_id, account_labels)
-        logger.info(f"Enqueued scan task {task.id} for user {request.user_id}")
+        logger.info("Enqueued scan task %s for user %s", task.id, request.user_id)
 
         return StartScanResponse(
             job_id=task.id,
@@ -134,7 +134,7 @@ async def start_scan(
         )
 
     except Exception as e:
-        logger.error(f"Error starting scan: {str(e)}", exc_info=True)
+        logger.error("Error starting scan: %s", str(e), exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to start scan")
 
 
@@ -257,7 +257,7 @@ async def get_job_status(job_id: str, db: Session = Depends(get_sync_db)) -> Job
             )
 
     except Exception as e:
-        logger.error(f"Error getting job status: {str(e)}")
+        logger.error("Error getting job status: %s", str(e))
         raise HTTPException(status_code=404, detail="Job not found")
 
 
@@ -273,7 +273,7 @@ async def cancel_job(job_id: str, db: Session = Depends(get_sync_db)) -> dict[st
     Returns:
         Cancellation status
     """
-    logger.info(f"Cancelling job {job_id}")
+    logger.info("Cancelling job %s", job_id)
 
     # Find job in database
     job = (
@@ -303,7 +303,7 @@ async def cancel_job(job_id: str, db: Session = Depends(get_sync_db)) -> dict[st
         job.completed_at = datetime.utcnow()
         db.commit()
 
-        logger.info(f"Cancelled job {job_id}")
+        logger.info("Cancelled job %s", job_id)
 
         return {
             "status": "success",
@@ -311,7 +311,7 @@ async def cancel_job(job_id: str, db: Session = Depends(get_sync_db)) -> dict[st
         }
 
     except Exception as e:
-        logger.error(f"Error cancelling job: {str(e)}")
+        logger.error("Error cancelling job: %s", str(e))
         raise HTTPException(status_code=500, detail="Failed to cancel job")
 
 

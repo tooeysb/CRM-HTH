@@ -3,18 +3,20 @@ Enrichment merger for CRM data.
 Merges multi-tab enrichment data with tab priority and updates relationship profiles.
 """
 
-import logging
 from dataclasses import dataclass
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from src.models.company import Company
 from src.models.contact import Contact
 from src.models.contact_enrichment import ContactEnrichment
 from src.models.relationship_profile import RelationshipProfile
 
-logger = logging.getLogger(__name__)
+from src.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 # Tab priority order (highest first) for resolving field conflicts
 _TAB_PRIORITY: list[str] = [
@@ -67,6 +69,24 @@ class EnrichmentMerger:
             "Found %d unique emails with enrichment data", len(enrichment_groups)
         )
 
+        # Bulk-load all companies referenced by enrichments to avoid N+1 queries
+        all_company_ids = {
+            e.company_id
+            for group in enrichment_groups.values()
+            for e in group
+            if e.company_id
+        }
+        companies_by_id: dict = {}
+        if all_company_ids:
+            companies = (
+                self.db.execute(
+                    select(Company).where(Company.id.in_(all_company_ids))
+                )
+                .scalars()
+                .all()
+            )
+            companies_by_id = {c.id: c for c in companies}
+
         for email, enrichments in enrichment_groups.items():
             contact = self._get_contact(email)
             if contact is None:
@@ -75,7 +95,7 @@ class EnrichmentMerger:
             self._merge_contact_data(contact, enrichments)
             stats.contacts_merged += 1
 
-            if self._update_relationship_profile(contact, enrichments):
+            if self._update_relationship_profile(contact, enrichments, companies_by_id):
                 stats.profiles_updated += 1
 
             if len(enrichments) > 1:
@@ -175,7 +195,10 @@ class EnrichmentMerger:
             contact.tags = sorted(all_tags)
 
     def _update_relationship_profile(
-        self, contact: Contact, enrichments: list[ContactEnrichment]
+        self,
+        contact: Contact,
+        enrichments: list[ContactEnrichment],
+        companies_by_id: dict | None = None,
     ) -> bool:
         """
         Populate customer_data JSON on the contact's RelationshipProfile.
@@ -191,16 +214,15 @@ class EnrichmentMerger:
         if profile is None:
             return False
 
+        companies_by_id = companies_by_id or {}
+
         # Build customer_data from enrichment sources
         customer_data: dict = {}
 
         # Company info (from highest-priority enrichment with company_id)
         for e in enrichments:
             if e.company_id:
-                from src.models.company import Company
-
-                stmt_c = select(Company).where(Company.id == e.company_id)
-                company = self.db.execute(stmt_c).scalar_one_or_none()
+                company = companies_by_id.get(e.company_id)
                 if company:
                     customer_data["company_name"] = company.name
                     customer_data["company_domain"] = company.domain

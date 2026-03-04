@@ -5,7 +5,6 @@ Uses SQL queries to find bidirectional contacts and compute communication metric
 No external API calls needed - works entirely from the emails table.
 """
 
-import logging
 import re
 from typing import Any
 from uuid import UUID
@@ -13,10 +12,13 @@ from uuid import UUID
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
+from src.core.config import settings
+from src.core.logging import get_logger
+from src.core.utils import GENERIC_EMAIL_DOMAINS
 from src.models.account import GmailAccount
 from src.models.email import Email, EmailTag
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Automated/noreply addresses to exclude
 NOREPLY_PATTERNS = [
@@ -42,11 +44,9 @@ NOREPLY_PATTERNS = [
 
 _NOREPLY_COMPILED = [re.compile(p, re.IGNORECASE) for p in NOREPLY_PATTERNS]
 
-# Known user email addresses (these are the sender for outgoing emails)
-USER_EMAILS = {
-    "tooey@procore.com",
-    "2e@procore.com",
-    "tooey@hth-corp.com",
+# Derive user email addresses from settings instead of hardcoding.
+USER_EMAILS: set[str] = {
+    acct["email"] for acct in settings.get_gmail_accounts()
 }
 
 
@@ -84,25 +84,7 @@ def _classify_relationship(email_addr: str, tags: dict[str, int]) -> str:
     if domain == "procore.com":
         return "coworker"
 
-    personal_domains = {
-        "gmail.com",
-        "yahoo.com",
-        "hotmail.com",
-        "outlook.com",
-        "icloud.com",
-        "aol.com",
-        "protonmail.com",
-        "me.com",
-        "live.com",
-        "msn.com",
-        "comcast.net",
-        "att.net",
-        "verizon.net",
-        "sbcglobal.net",
-        "cox.net",
-        "charter.net",
-    }
-    if domain in personal_domains:
+    if domain in GENERIC_EMAIL_DOMAINS:
         return "personal"
 
     return "unknown"
@@ -122,7 +104,7 @@ def discover_contacts(user_id: UUID, db: Session) -> list[dict[str, Any]]:
     Returns:
         List of contact dictionaries with metrics.
     """
-    logger.info(f"Discovering contacts for user {user_id}")
+    logger.info("Discovering contacts for user %s", user_id)
 
     # Step 1: Find all unique sender emails (people who emailed the user)
     received_query = (
@@ -145,7 +127,7 @@ def discover_contacts(user_id: UUID, db: Session) -> list[dict[str, Any]]:
                 "last_received": row.last_received,
             }
 
-    logger.info(f"Found {len(received_map)} unique sender addresses")
+    logger.info("Found %s unique sender addresses", len(received_map))
 
     # Step 2: Find all addresses the user sent emails to
     # recipient_emails is a comma-separated field, parse in Python
@@ -167,7 +149,7 @@ def discover_contacts(user_id: UUID, db: Session) -> list[dict[str, Any]]:
             if addr and not _is_user_email(addr) and not _is_noreply(addr):
                 sent_map[addr] = sent_map.get(addr, 0) + 1
 
-    logger.info(f"Found {len(sent_map)} unique recipient addresses")
+    logger.info("Found %s unique recipient addresses", len(sent_map))
 
     # Step 3: Find bidirectional contacts (in both sets)
     bidirectional = set(received_map.keys()) & set(sent_map.keys())
@@ -177,9 +159,10 @@ def discover_contacts(user_id: UUID, db: Session) -> list[dict[str, Any]]:
     contacts_to_profile = bidirectional | replied_to
 
     logger.info(
-        f"Bidirectional contacts: {len(bidirectional)}, "
-        f"replied-to additions: {len(replied_to - bidirectional)}, "
-        f"total: {len(contacts_to_profile)}"
+        "Bidirectional contacts: %s, replied-to additions: %s, total: %s",
+        len(bidirectional),
+        len(replied_to - bidirectional),
+        len(contacts_to_profile),
     )
 
     # Step 4: Bulk fetch relationship tags
@@ -230,7 +213,7 @@ def discover_contacts(user_id: UUID, db: Session) -> list[dict[str, Any]]:
     # Sort by total email count descending
     contacts.sort(key=lambda c: c["total_email_count"], reverse=True)
 
-    logger.info(f"Contact discovery complete: {len(contacts)} contacts found")
+    logger.info("Contact discovery complete: %s contacts found", len(contacts))
     return contacts
 
 

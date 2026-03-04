@@ -11,7 +11,9 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, selectinload
 
+from src.api.middleware.auth import get_current_user
 from src.core.database import get_sync_db
+from src.core.utils import serialize_dt
 from src.models.company import Company
 from src.models.contact import Contact
 from src.models.email import Email
@@ -20,6 +22,17 @@ from src.models.relationship_profile import RelationshipProfile
 from src.models.user import User
 
 router = APIRouter()
+
+# Allowed sort columns to prevent attribute enumeration via getattr
+CONTACT_SORTABLE_COLUMNS: frozenset[str] = frozenset({
+    "email_count", "name", "email", "last_contact_at", "created_at",
+    "updated_at", "title", "contact_type", "is_vip",
+})
+
+COMPANY_SORTABLE_COLUMNS: frozenset[str] = frozenset({
+    "arr", "name", "domain", "created_at", "updated_at", "account_tier",
+    "industry", "company_type", "revenue_segment",
+})
 
 
 # ---------------------------------------------------------------------------
@@ -114,6 +127,7 @@ class CompanyUpdateRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+# _get_user kept for backward compat with tests; prefer Depends(get_current_user)
 def _get_user(db: Session) -> User:
     user = db.query(User).first()
     if not user:
@@ -121,8 +135,38 @@ def _get_user(db: Session) -> User:
     return user
 
 
-def _serialize_dt(dt: datetime | None) -> str | None:
-    return dt.isoformat() if dt else None
+# Re-export for test compatibility
+_serialize_dt = serialize_dt
+
+
+def _serialize_email_dict(email: Email, direction: str | None = None) -> dict:
+    """Serialize an Email model to a response dict."""
+    result = {
+        "id": str(email.id),
+        "subject": email.subject,
+        "date": serialize_dt(email.date),
+        "sender_name": email.sender_name,
+        "sender_email": email.sender_email,
+        "summary": email.summary,
+        "has_attachments": email.has_attachments,
+        "body": email.body,
+    }
+    if direction is not None:
+        result["direction"] = direction
+    return result
+
+
+def _paginated_response(
+    total: int, page: int, page_size: int, items: list
+) -> dict:
+    """Build a standard paginated response envelope."""
+    return {
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": (total + page_size - 1) // page_size,
+        "items": items,
+    }
 
 
 def _serialize_contact(contact: Contact, company_name: str | None = None) -> dict:
@@ -144,14 +188,14 @@ def _serialize_contact(contact: Contact, company_name: str | None = None) -> dic
             if contact.company_id and company_name
             else None
         ),
-        "last_contact_at": _serialize_dt(contact.last_contact_at),
+        "last_contact_at": serialize_dt(contact.last_contact_at),
         "notes": contact.notes,
         "personal_email": contact.personal_email,
         "account_sources": contact.account_sources or [],
         "salesforce_id": contact.salesforce_id,
         "address": contact.address,
-        "created_at": _serialize_dt(contact.created_at),
-        "updated_at": _serialize_dt(contact.updated_at),
+        "created_at": serialize_dt(contact.created_at),
+        "updated_at": serialize_dt(contact.updated_at),
     }
 
 
@@ -174,8 +218,8 @@ def _serialize_company(company: Company, contact_count: int = 0) -> dict:
         "notes": company.notes,
         "contact_count": contact_count,
         "source_data": company.source_data,
-        "created_at": _serialize_dt(company.created_at),
-        "updated_at": _serialize_dt(company.updated_at),
+        "created_at": serialize_dt(company.created_at),
+        "updated_at": serialize_dt(company.updated_at),
     }
 
 
@@ -185,9 +229,10 @@ def _serialize_company(company: Company, contact_count: int = 0) -> dict:
 
 
 @router.get("/dashboard")
-def crm_dashboard(db: Session = Depends(get_sync_db)):
+def crm_dashboard(
+    user: User = Depends(get_current_user), db: Session = Depends(get_sync_db)
+):
     """CRM dashboard with aggregate statistics."""
-    user = _get_user(db)
     uid = user.id
 
     total_contacts = (
@@ -225,19 +270,7 @@ def crm_dashboard(db: Session = Depends(get_sync_db)):
         .limit(20)
         .all()
     )
-    recent_emails = [
-        {
-            "id": str(e.id),
-            "subject": e.subject,
-            "date": _serialize_dt(e.date),
-            "sender_name": e.sender_name,
-            "sender_email": e.sender_email,
-            "summary": e.summary,
-            "has_attachments": e.has_attachments,
-            "body": e.body,
-        }
-        for e in recent_emails_q
-    ]
+    recent_emails = [_serialize_email_dict(e) for e in recent_emails_q]
 
     # Email volume by month (last 12 months)
     volume_q = (
@@ -283,10 +316,10 @@ def list_contacts(
     contact_type: Optional[str] = Query(None),
     tags: Optional[str] = Query(None, description="Comma-separated tags"),
     company_id: Optional[str] = Query(None),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_sync_db),
 ):
     """Paginated contact list with search and filtering."""
-    user = _get_user(db)
     uid = user.id
 
     query = (
@@ -324,8 +357,10 @@ def list_contacts(
     # Count before pagination
     total = query.count()
 
-    # Sorting
-    sort_column = getattr(Contact, sort_by, Contact.email_count)
+    # Sorting (whitelist to prevent attribute enumeration)
+    if sort_by not in CONTACT_SORTABLE_COLUMNS:
+        raise HTTPException(status_code=400, detail=f"Invalid sort column: {sort_by}")
+    sort_column = getattr(Contact, sort_by)
     if sort_dir.lower() == "asc":
         query = query.order_by(sort_column.asc())
     else:
@@ -335,17 +370,10 @@ def list_contacts(
     offset = (page - 1) * page_size
     contacts = query.offset(offset).limit(page_size).all()
 
-    total_pages = (total + page_size - 1) // page_size
-
-    return {
-        "total": total,
-        "page": page,
-        "page_size": page_size,
-        "total_pages": total_pages,
-        "items": [
-            _serialize_contact(c, c.company.name if c.company else None) for c in contacts
-        ],
-    }
+    return _paginated_response(
+        total, page, page_size,
+        [_serialize_contact(c, c.company.name if c.company else None) for c in contacts],
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -354,9 +382,12 @@ def list_contacts(
 
 
 @router.get("/contacts/{contact_id}")
-def get_contact(contact_id: str, db: Session = Depends(get_sync_db)):
+def get_contact(
+    contact_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_sync_db),
+):
     """Get full contact detail with relationship profile and recent emails."""
-    user = _get_user(db)
     uid = user.id
 
     contact = (
@@ -410,19 +441,7 @@ def get_contact(contact_id: str, db: Session = Depends(get_sync_db)):
         if e is None:
             continue
         direction = "received" if ep.role == "sender" else "sent"
-        recent_emails.append(
-            {
-                "id": str(e.id),
-                "subject": e.subject,
-                "date": _serialize_dt(e.date),
-                "sender_name": e.sender_name,
-                "sender_email": e.sender_email,
-                "summary": e.summary,
-                "has_attachments": e.has_attachments,
-                "direction": direction,
-                "body": e.body,
-            }
-        )
+        recent_emails.append(_serialize_email_dict(e, direction=direction))
 
     # Sort recent emails by date descending
     recent_emails.sort(key=lambda x: x["date"] or "", reverse=True)
@@ -485,10 +504,10 @@ def get_contact(contact_id: str, db: Session = Depends(get_sync_db)):
 def update_contact(
     contact_id: str,
     body: ContactUpdateRequest,
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_sync_db),
 ):
     """Update editable contact fields."""
-    user = _get_user(db)
     uid = user.id
 
     contact = (
@@ -513,7 +532,10 @@ def update_contact(
             if not company:
                 raise HTTPException(status_code=404, detail="Company not found")
 
+    allowed_fields = set(ContactUpdateRequest.model_fields.keys())
     for field, value in update_data.items():
+        if field not in allowed_fields:
+            raise HTTPException(status_code=400, detail=f"Field '{field}' is not updatable")
         setattr(contact, field, value)
 
     db.commit()
@@ -532,10 +554,10 @@ def list_contact_emails(
     contact_id: str,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_sync_db),
 ):
     """Paginated emails for a specific contact via EmailParticipant junction."""
-    user = _get_user(db)
     uid = user.id
 
     contact = (
@@ -553,7 +575,6 @@ def list_contact_emails(
 
     total = base_query.count()
     offset = (page - 1) * page_size
-    total_pages = (total + page_size - 1) // page_size
 
     participants = (
         base_query.order_by(Email.date.desc()).offset(offset).limit(page_size).all()
@@ -565,27 +586,9 @@ def list_contact_emails(
         if e is None:
             continue
         direction = "received" if ep.role == "sender" else "sent"
-        items.append(
-            {
-                "id": str(e.id),
-                "subject": e.subject,
-                "date": _serialize_dt(e.date),
-                "sender_name": e.sender_name,
-                "sender_email": e.sender_email,
-                "summary": e.summary,
-                "has_attachments": e.has_attachments,
-                "direction": direction,
-                "body": e.body,
-            }
-        )
+        items.append(_serialize_email_dict(e, direction=direction))
 
-    return {
-        "total": total,
-        "page": page,
-        "page_size": page_size,
-        "total_pages": total_pages,
-        "items": items,
-    }
+    return _paginated_response(total, page, page_size, items)
 
 
 # ---------------------------------------------------------------------------
@@ -602,10 +605,10 @@ def list_companies(
     sort_dir: str = Query("desc"),
     company_type: Optional[str] = Query(None),
     account_tier: Optional[str] = Query(None),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_sync_db),
 ):
     """Paginated company list with search and filtering."""
-    user = _get_user(db)
     uid = user.id
 
     # Subquery for contact_count
@@ -642,11 +645,13 @@ def list_companies(
 
     total = query.count()
 
-    # Sorting - handle contact_count specially since it's a computed column
+    # Sorting (whitelist to prevent attribute enumeration)
     if sort_by == "contact_count":
         sort_col = func.coalesce(contact_count_sq.c.contact_count, 0)
+    elif sort_by not in COMPANY_SORTABLE_COLUMNS:
+        raise HTTPException(status_code=400, detail=f"Invalid sort column: {sort_by}")
     else:
-        sort_col = getattr(Company, sort_by, Company.arr)
+        sort_col = getattr(Company, sort_by)
     if sort_dir.lower() == "asc":
         query = query.order_by(sort_col.asc().nullslast())
     else:
@@ -655,17 +660,9 @@ def list_companies(
     offset = (page - 1) * page_size
     results = query.offset(offset).limit(page_size).all()
 
-    total_pages = (total + page_size - 1) // page_size
-
     items = [_serialize_company(company, cc) for company, cc in results]
 
-    return {
-        "total": total,
-        "page": page,
-        "page_size": page_size,
-        "total_pages": total_pages,
-        "items": items,
-    }
+    return _paginated_response(total, page, page_size, items)
 
 
 # ---------------------------------------------------------------------------
@@ -674,9 +671,12 @@ def list_companies(
 
 
 @router.get("/companies/{company_id}")
-def get_company(company_id: str, db: Session = Depends(get_sync_db)):
+def get_company(
+    company_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_sync_db),
+):
     """Get full company detail with contacts and email summary."""
-    user = _get_user(db)
     uid = user.id
 
     company = (
@@ -746,10 +746,10 @@ def get_company(company_id: str, db: Session = Depends(get_sync_db)):
 def update_company(
     company_id: str,
     body: CompanyUpdateRequest,
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_sync_db),
 ):
     """Update editable company fields."""
-    user = _get_user(db)
     uid = user.id
 
     company = (
@@ -761,7 +761,10 @@ def update_company(
         raise HTTPException(status_code=404, detail="Company not found")
 
     update_data = body.model_dump(exclude_unset=True)
+    allowed_fields = set(CompanyUpdateRequest.model_fields.keys())
     for field, value in update_data.items():
+        if field not in allowed_fields:
+            raise HTTPException(status_code=400, detail=f"Field '{field}' is not updatable")
         setattr(company, field, value)
 
     db.commit()
@@ -786,10 +789,10 @@ def update_company(
 def global_search(
     q: str = Query(..., min_length=1),
     limit: int = Query(10, ge=1, le=50),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_sync_db),
 ):
     """Global search across contacts and companies."""
-    user = _get_user(db)
     uid = user.id
     pattern = f"%{q}%"
 

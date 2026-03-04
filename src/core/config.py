@@ -39,7 +39,7 @@ class Settings(BaseSettings):
 
     # Obsidian Vault
     obsidian_vault_path: str = Field(
-        default="/Users/tooeycourtemanche/Documents/Obsidian Vault - Gmail",
+        default="/tmp/obsidian-vault",
         alias="OBSIDIAN_VAULT_PATH",
     )
 

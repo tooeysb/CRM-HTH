@@ -29,20 +29,25 @@ venv/bin/python generate_vault.py --profile-limit 10   # Test 10 contacts
 venv/bin/python generate_vault.py --vault-only          # Regenerate from existing profiles
 
 # Tests
-venv/bin/pytest tests/unit/ -v
-venv/bin/pytest tests/unit/integrations/gmail/test_rate_limiter.py -v  # Single test file
+venv/bin/pytest tests/unit/ -v                                        # All unit tests (235+)
+venv/bin/pytest tests/unit/api/test_security.py -v                    # Security/auth tests
+venv/bin/pytest tests/unit/worker/test_phases.py -v                   # Worker phase tests
+venv/bin/pytest tests/unit/api/test_correlation.py -v                 # Correlation ID tests
+venv/bin/pytest tests/unit/integrations/gmail/test_rate_limiter.py -v # Single test file
 
 # Linting
-venv/bin/black --line-length 100 --check src/
-venv/bin/ruff check src/
+venv/bin/black --line-length 100 --check src/ tests/
+venv/bin/ruff check src/ tests/
 ```
 
 ## Architecture
 
 ```
 FastAPI Routers (src/api/routers/)
-  → auth, dashboard, scan, draft
+  → auth, dashboard, scan, draft, crm
   → Uses sync DB sessions (psycopg2)
+  → API key auth via X-API-Key header (src/api/middleware/auth.py)
+  → Correlation ID middleware (src/api/middleware/correlation.py)
 
 Services (src/services/)
   → theme_detection/  - Claude prompt templates, tag generation
@@ -57,7 +62,8 @@ Integrations (src/integrations/)
   → claude/batch_processor.py - Batch API + sync fallback with prompt caching
 
 Worker (src/worker/)
-  → tasks.py          - Main orchestration (sequential phases)
+  → tasks.py          - Thin orchestrator calling phase modules
+  → phases/           - email_sync, theme_detection, vault_generation
   → id_first_tasks.py - Parallel ID-first strategy (production)
 
 Models (src/models/)
@@ -89,6 +95,12 @@ Models (src/models/)
 
 **Eager loading**: Use `selectinload()` for relationships accessed in loops (e.g., `Email.tags`).
 
+**Authentication**: API key via `X-API-Key` header, validated against `settings.secret_key`. Public endpoints: `/`, `/health`, `/auth/*`, `/dashboard/widget`. Protected: `/crm/*`, `/draft/*`, `/scan/*`, `/dashboard/stats`.
+
+**Correlation IDs**: Every API request gets an `X-Request-ID` (client-supplied or auto-generated). Available in logs via `[request_id]` prefix. Use `request_id_var.get()` from `src.api.middleware.correlation` in async context.
+
+**Logging**: Use `from src.core.logging import get_logger`. Always lazy format: `logger.info("msg %s", var)`. JSON output in production (`APP_ENV=production`). Automatic credential redaction.
+
 ## Deployment
 
 - **Production**: Heroku (`gmail-obsidian-sync`) with web + worker + monitor dynos
@@ -109,7 +121,9 @@ heroku logs --app gmail-obsidian-sync --dyno worker --tail
 - **Alembic env.py**: Must convert `DATABASE_URL` from `postgresql://` to `postgresql+asyncpg://` for migrations
 - **recipient_emails field**: Comma-separated string, not array — must parse in Python and handle `"Name <email>"` format
 - **Contact discovery**: Bulk queries essential — per-contact queries against remote Supabase are prohibitively slow (14k+ contacts)
-- **Long-running DB operations**: Close/refresh sessions after Gmail fetches (2-3 min) to avoid Supabase timeouts
+- **Long-running DB operations**: Close/refresh sessions after Gmail fetches (2-3 min) to avoid Supabase timeouts. Use `db.merge(obj)` to re-attach detached ORM objects after session reopen.
+- **WorkerSessionLocal**: Has `expire_on_commit=False` to prevent DetachedInstanceError in multi-session lifecycle
+- **ADRs**: Architecture decisions documented in `docs/adr/`
 
 ## Gmail Accounts
 

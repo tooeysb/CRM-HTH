@@ -15,7 +15,10 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
 from src.core.config import settings
+from src.core.logging import get_logger
 from src.integrations.gmail.rate_limiter import GmailRateLimiter, with_retry
+
+logger = get_logger(__name__)
 
 
 class GmailClientError(Exception):
@@ -217,7 +220,7 @@ class GmailClient:
             message_ids = ["msg1", "msg2", "msg3"]
             emails = client.fetch_message_batch(message_ids)
             for email in emails:
-                print(email["subject"], email["sender_email"])
+                process(email["subject"], email["sender_email"])
         """
         if not message_ids:
             return []
@@ -259,14 +262,14 @@ class GmailClient:
                 """Callback for batch request."""
                 if exception:
                     # Log error but don't fail entire batch
-                    print(f"Error fetching message {request_id}: {exception}")
+                    logger.warning("Error fetching message %s: %s", request_id, exception)
                     return
 
                 try:
                     parsed_email = self._parse_message(response)
                     emails.append(parsed_email)
                 except Exception as e:
-                    print(f"Error parsing message {request_id}: {e}")
+                    logger.error("Error parsing message %s: %s", request_id, e)
 
             # Add each message to batch
             for msg_id in message_ids:

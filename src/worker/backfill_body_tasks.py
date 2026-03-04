@@ -17,30 +17,24 @@ import uuid
 from datetime import datetime, timedelta
 
 from celery import group
-from sqlalchemy import create_engine, func, text, update
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy import func, text, update
 
 from src.core.config import settings
+from src.core.database import WorkerSessionLocal as SessionLocal
 from src.core.logging import get_logger
 from src.integrations.gmail.client import GmailClient
 from src.integrations.gmail.rate_limiter import GmailRateLimiter
 from src.models import Email, GmailAccount
 from src.worker.celery_app import celery_app
 
-engine = create_engine(
-    settings.database_url,
-    pool_pre_ping=True,
-    pool_size=5,       # Support high worker parallelism
-    max_overflow=5,    # Allow overflow during burst
-    pool_recycle=300,  # Recycle every 5 min (Supabase SSL timeouts)
-)
-SessionLocal = sessionmaker(bind=engine)
-
 logger = get_logger(__name__)
 
 # Tuning knobs
 BATCH_SIZE = 500  # Emails per worker cycle
 WORKERS_PER_ACCOUNT = 3  # Default for non-workspace accounts
+
+# Sentinel value written to body while fetch is in progress.
+FETCHING_SENTINEL = "__fetching__"
 
 # Account-specific overrides for high-limit accounts
 PROCORE_MAIN_EMAIL = "tooey@procore.com"
@@ -93,7 +87,7 @@ def start_body_backfill(account_id: str, num_workers: int | None = None):
     try:
         account = db.query(GmailAccount).filter(GmailAccount.id == account_id).first()
         if not account:
-            logger.error(f"[{task_id}] Account {account_id} not found")
+            logger.error("[%s] Account %s not found", task_id, account_id)
             return
 
         # Use account-specific worker count
@@ -111,16 +105,19 @@ def start_body_backfill(account_id: str, num_workers: int | None = None):
         )
 
         if not missing:
-            logger.info(f"[{task_id}] [{account.account_email}] All emails have bodies!")
+            logger.info("[%s] [%s] All emails have bodies!", task_id, account.account_email)
             return
 
         # Cap workers to available work
         needed_workers = min(num_workers, (missing + BATCH_SIZE - 1) // BATCH_SIZE)
 
         logger.info(
-            f"[{task_id}] [{account.account_email}] {missing} emails need bodies. "
-            f"Spawning {needed_workers} parallel workers (rate limit: "
-            f"{'15k/min' if account.account_email == PROCORE_MAIN_EMAIL else 'standard'})"
+            "[%s] [%s] %s emails need bodies. Spawning %s parallel workers (rate limit: %s)",
+            task_id,
+            account.account_email,
+            missing,
+            needed_workers,
+            "15k/min" if account.account_email == PROCORE_MAIN_EMAIL else "standard",
         )
 
         tasks = [backfill_worker.s(account_id) for _ in range(needed_workers)]
@@ -151,7 +148,7 @@ def backfill_worker(account_id: str):
     try:
         account = db.query(GmailAccount).filter(GmailAccount.id == account_id).first()
         if not account:
-            logger.error(f"[{task_id}] Account {account_id} not found")
+            logger.error("[%s] Account %s not found", task_id, account_id)
             return
 
         # Claim a batch: find emails without body, lock them
@@ -168,7 +165,7 @@ def backfill_worker(account_id: str):
         )
 
         if not emails_to_fetch:
-            logger.info(f"[{task_id}] [{account.account_email}] No more emails need bodies")
+            logger.info("[%s] [%s] No more emails need bodies", task_id, account.account_email)
             return
 
         email_ids = [row[0] for row in emails_to_fetch]
@@ -178,12 +175,12 @@ def backfill_worker(account_id: str):
         db.execute(
             update(Email)
             .where(Email.id.in_(email_ids))
-            .values(body="__fetching__", updated_at=datetime.utcnow())
+            .values(body=FETCHING_SENTINEL, updated_at=datetime.utcnow())
         )
         db.commit()
 
         logger.info(
-            f"[{task_id}] [{account.account_email}] Claimed {len(gmail_ids)} emails"
+            "[%s] [%s] Claimed %s emails", task_id, account.account_email, len(gmail_ids)
         )
 
         # Save creds and close DB before long Gmail fetch
@@ -198,7 +195,7 @@ def backfill_worker(account_id: str):
 
         try:
             email_dicts = gmail_client.fetch_message_batch(gmail_ids, format="full")
-            logger.info(f"[{task_id}] [{account_email}] Fetched {len(email_dicts)} from Gmail")
+            logger.info("[%s] [%s] Fetched %s from Gmail", task_id, account_email, len(email_dicts))
 
             # Reopen DB for writes
             db = SessionLocal()
@@ -266,12 +263,16 @@ def backfill_worker(account_id: str):
             db.commit()
 
             logger.info(
-                f"[{task_id}] [{account_email}] Updated {updated} bodies "
-                f"({len(no_body_ids)} no text, {len(failed_ids)} failed→retry)"
+                "[%s] [%s] Updated %s bodies (%s no text, %s failed→retry)",
+                task_id,
+                account_email,
+                updated,
+                len(no_body_ids),
+                len(failed_ids),
             )
 
         except Exception as e:
-            logger.error(f"[{task_id}] [{account_email}] Gmail fetch error: {e}")
+            logger.error("[%s] [%s] Gmail fetch error: %s", task_id, account_email, e)
             # Clear sentinel so these get retried
             db = SessionLocal()
             db.execute(
@@ -282,29 +283,23 @@ def backfill_worker(account_id: str):
             db.commit()
             raise
 
-        # Self-sustain: check for remaining work and spawn replacement
+        # Self-sustain: infer remaining work from batch size instead of extra query.
+        # If this batch was full, there's almost certainly more work.
         try:
-            has_more = (
-                db.query(Email.id)
-                .filter(
-                    Email.account_id == account_id,
-                    Email.body == None,  # noqa: E711
-                )
-                .limit(1)
-                .first()
-            ) is not None
+            has_more = len(emails_to_fetch) >= BATCH_SIZE
 
             if has_more:
                 logger.info(
-                    f"[{task_id}] [{account_email}] More emails remaining, "
-                    f"spawning replacement worker"
+                    "[%s] [%s] More emails remaining, spawning replacement worker",
+                    task_id,
+                    account_email,
                 )
                 backfill_worker.delay(account_id)
             else:
-                logger.info(f"[{task_id}] [{account_email}] Backfill complete!")
+                logger.info("[%s] [%s] Backfill complete!", task_id, account_email)
 
         except Exception as e:
-            logger.error(f"[{task_id}] Error checking remaining: {e}")
+            logger.error("[%s] Error checking remaining: %s", task_id, e)
 
     finally:
         db.close()
@@ -312,20 +307,20 @@ def backfill_worker(account_id: str):
 
 @celery_app.task(name="cleanup_stuck_fetching")
 def cleanup_stuck_fetching():
-    """Reset emails stuck in __fetching__ state for more than 10 minutes."""
+    """Reset emails stuck in fetching state for more than 10 minutes."""
     db = SessionLocal()
     try:
         cutoff = datetime.utcnow() - timedelta(minutes=10)
         result = db.execute(
             update(Email)
             .where(
-                Email.body == "__fetching__",
+                Email.body == FETCHING_SENTINEL,
                 Email.updated_at < cutoff,
             )
             .values(body=None)
         )
         if result.rowcount > 0:
-            logger.warning(f"Reset {result.rowcount} stuck __fetching__ emails")
+            logger.warning("Reset %s stuck fetching emails", result.rowcount)
         db.commit()
     finally:
         db.close()

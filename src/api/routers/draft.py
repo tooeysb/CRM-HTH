@@ -8,8 +8,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from src.api.middleware.auth import get_current_user
 from src.core.database import get_sync_db
+from src.core.logging import get_logger
+from src.models.user import User
 from src.services.voice.draft_service import EmailDraftService
+
+logger = get_logger(__name__)
 
 router = APIRouter()
 
@@ -17,7 +22,6 @@ router = APIRouter()
 class DraftRequest(BaseModel):
     """Request body for composing an email draft."""
 
-    user_id: str
     recipient_email: str
     context: str
     tone: str | None = None
@@ -35,7 +39,11 @@ class DraftResponse(BaseModel):
 
 
 @router.post("/compose", response_model=DraftResponse)
-def compose_draft(request: DraftRequest, db: Session = Depends(get_sync_db)):
+def compose_draft(
+    request: DraftRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_sync_db),
+):
     """
     Generate a voice-matched email draft.
 
@@ -45,7 +53,7 @@ def compose_draft(request: DraftRequest, db: Session = Depends(get_sync_db)):
     try:
         service = EmailDraftService(db)
         result = service.draft_email(
-            user_id=request.user_id,
+            user_id=str(user.id),
             recipient_email=request.recipient_email,
             context=request.context,
             tone=request.tone,
@@ -62,5 +70,6 @@ def compose_draft(request: DraftRequest, db: Session = Depends(get_sync_db)):
 
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Draft generation failed: {e}")
+    except Exception:
+        logger.error("Draft generation failed", exc_info=True)
+        raise HTTPException(status_code=500, detail="Draft generation failed")

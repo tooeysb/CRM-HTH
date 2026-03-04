@@ -1,9 +1,14 @@
 """
-Logging utilities with automatic credential redaction.
+Logging utilities with automatic credential redaction and correlation ID support.
 Ensures sensitive data is never exposed in logs.
+
+In production (APP_ENV=production), emits structured JSON logs for log aggregation.
+In development, emits human-readable logs with optional request_id.
 """
 
+import json
 import logging
+import os
 import re
 from typing import Any
 
@@ -45,20 +50,52 @@ def redact_sensitive_data(message: str) -> str:
     return redacted
 
 
+def _get_request_id() -> str:
+    """Get current request ID from correlation middleware, or '-' if unavailable."""
+    try:
+        from src.api.middleware.correlation import request_id_var
+        return request_id_var.get()
+    except Exception:
+        return "-"
+
+
 class RedactingFormatter(logging.Formatter):
-    """Custom logging formatter that redacts sensitive information."""
+    """Human-readable formatter with redaction and request_id."""
 
     def format(self, record: logging.LogRecord) -> str:
-        """Format log record with sensitive data redacted."""
-        # Format the record normally first
+        """Format log record with request_id and sensitive data redacted."""
+        record.request_id = _get_request_id()
         formatted = super().format(record)
-        # Redact sensitive information
         return redact_sensitive_data(formatted)
+
+
+class JsonFormatter(logging.Formatter):
+    """Structured JSON formatter for production log aggregation."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        """Emit a single JSON line per log record."""
+        log_entry = {
+            "timestamp": self.formatTime(record, self.datefmt),
+            "level": record.levelname,
+            "logger": record.name,
+            "request_id": _get_request_id(),
+            "message": redact_sensitive_data(record.getMessage()),
+        }
+        if record.exc_info and record.exc_info[1]:
+            log_entry["exception"] = self.formatException(record.exc_info)
+        return json.dumps(log_entry, default=str)
+
+
+def _is_production() -> bool:
+    return os.environ.get("APP_ENV", "development").lower() == "production"
 
 
 def get_logger(name: str) -> logging.Logger:
     """
     Get a logger instance with redacting formatter.
+
+    Uses JSON output in production, human-readable in development.
+    Includes request_id from correlation middleware when available.
 
     Args:
         name: Logger name (typically __name__)
@@ -71,10 +108,13 @@ def get_logger(name: str) -> logging.Logger:
     # Only configure if no handlers exist
     if not logger.handlers:
         handler = logging.StreamHandler()
-        formatter = RedactingFormatter(
-            fmt="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S",
-        )
+        if _is_production():
+            formatter = JsonFormatter(datefmt="%Y-%m-%dT%H:%M:%S")
+        else:
+            formatter = RedactingFormatter(
+                fmt="%(asctime)s - %(name)s - %(levelname)s - [%(request_id)s] %(message)s",
+                datefmt="%Y-%m-%d %H:%M:%S",
+            )
         handler.setFormatter(formatter)
         logger.addHandler(handler)
         logger.setLevel(logging.INFO)

@@ -1,84 +1,60 @@
 """
 Celery tasks for Gmail-to-Obsidian integration.
-Main orchestration task that coordinates all components.
+Main orchestration task that coordinates phase modules.
 """
 
 import json
-import logging
-import time
 import uuid
-from collections import defaultdict
 from datetime import datetime
 from typing import Any
 
 from celery import Task
-from sqlalchemy import create_engine, func
-from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy import func
+from sqlalchemy.orm import Session
 
 from src.core.config import settings
 from src.core.logging import get_logger
 from src.integrations.claude.batch_processor import ThemeBatchProcessor
-from src.integrations.gmail.client import GmailClient
-from src.models import Contact, Email, EmailTag, GmailAccount, SyncJob, User
-from src.services.gmail.contact_merger import merge_contacts_by_email
+from src.models import Email, GmailAccount, SyncJob, User
 from src.services.obsidian.note_generator import NoteGenerator
 from src.services.obsidian.vault_manager import ObsidianVaultManager
-from src.services.theme_detection.prompt_template import generate_tags
 from src.worker.celery_app import celery_app
+from src.worker.phases.email_sync import sync_emails_for_accounts
+from src.worker.phases.theme_detection import detect_themes
+from src.worker.phases.vault_generation import generate_vault
 
 logger = get_logger(__name__)
 
-# Database session factory
-engine = create_engine(settings.database_url)
-SessionLocal = sessionmaker(bind=engine)
+# Database session factory (shared worker engine with connection recycling)
+from src.core.database import WorkerSessionLocal as SessionLocal
 
 
 def get_last_processed_email_date(db: Session, account_id: uuid.UUID) -> datetime | None:
-    """
-    Get the date of the most recent email we've already processed for an account.
-    This allows us to resume from where we left off.
-
-    Args:
-        db: Database session
-        account_id: Gmail account ID
-
-    Returns:
-        Most recent email date, or None if no emails exist
-    """
-    result = db.query(func.max(Email.date)).filter(Email.account_id == account_id).scalar()
-    return result
+    """Get the date of the most recent processed email for an account."""
+    return db.query(func.max(Email.date)).filter(Email.account_id == account_id).scalar()
 
 
 def get_oldest_processed_email_date(db: Session, account_id: uuid.UUID) -> datetime | None:
-    """
-    Get the date of the oldest email we've already processed for an account.
-    Used for historical backfill - fetching emails before the oldest one we have.
-
-    Args:
-        db: Database session
-        account_id: Gmail account ID
-
-    Returns:
-        Oldest email date, or None if no emails exist
-    """
-    result = db.query(func.min(Email.date)).filter(Email.account_id == account_id).scalar()
-    return result
+    """Get the date of the oldest processed email for an account."""
+    return db.query(func.min(Email.date)).filter(Email.account_id == account_id).scalar()
 
 
 def get_existing_email_count(db: Session, account_id: uuid.UUID) -> int:
-    """
-    Count how many emails we've already fetched for an account.
-
-    Args:
-        db: Database session
-        account_id: Gmail account ID
-
-    Returns:
-        Number of emails already in database
-    """
+    """Count emails already fetched for an account."""
     return db.query(func.count(Email.id)).filter(Email.account_id == account_id).scalar() or 0
+
+
+def _get_credentials_from_account(account: GmailAccount) -> dict:
+    """Extract credentials dict from GmailAccount for GmailClient."""
+    creds = json.loads(account.credentials)
+    return {
+        "access_token": creds.get("token"),
+        "refresh_token": creds.get("refresh_token"),
+        "token_uri": creds.get("token_uri"),
+        "client_id": creds.get("client_id"),
+        "client_secret": creds.get("client_secret"),
+        "scopes": creds.get("scopes", []),
+    }
 
 
 class CallbackTask(Task):
@@ -106,29 +82,18 @@ def scan_gmail_task(
     """
     Main orchestration task for multi-account Gmail scan.
 
-    Phases:
-    1. Sync contacts from all accounts (0-10%)
-    2. Merge contacts by email (10-15%)
-    3. Sync emails from all accounts (15-40%)
-    4. Detect themes with Claude Batch API (40-70%)
-    5. Generate unified Obsidian vault (70-100%)
-
-    Args:
-        user_id: User ID
-        account_labels: Optional list of account labels to scan (defaults to all 3)
-
-    Returns:
-        dict with status, progress, and metrics
+    Delegates to phase modules:
+      Phase 2: email_sync — fetch emails from Gmail (15-40%)
+      Phase 4: theme_detection — detect themes with Claude (40-70%)
+      Phase 5: vault_generation — generate Obsidian vault (70-100%, dev only)
     """
     correlation_id = str(uuid.uuid4())
     logger.info(
-        f"[{correlation_id}] Starting Gmail scan for user {user_id}, "
-        f"accounts: {account_labels}"
+        "[%s] Starting Gmail scan for user %s, accounts: %s",
+        correlation_id, user_id, account_labels,
     )
 
     if account_labels is None:
-        # Process in order: personal → procore-private → procore-main
-        # This processes tooey@hth-corp.com first, then 2e@procore.com, then tooey@procore.com
         account_labels = ["personal", "procore-private", "procore-main"]
 
     db = SessionLocal()
@@ -152,7 +117,7 @@ def scan_gmail_task(
         # Get user and accounts
         user = db.query(User).filter(User.id == uuid.UUID(user_id)).first()
         if not user:
-            raise ValueError(f"User {user_id} not found")
+            raise ValueError("User %s not found" % user_id)
 
         accounts = (
             db.query(GmailAccount)
@@ -165,411 +130,72 @@ def scan_gmail_task(
         )
 
         if not accounts:
-            raise ValueError(f"No active accounts found for labels: {account_labels}")
+            raise ValueError("No active accounts found for labels: %s" % account_labels)
 
-        logger.info(f"[{correlation_id}] Found {len(accounts)} accounts to scan")
+        logger.info("[%s] Found %d accounts to scan", correlation_id, len(accounts))
 
-        # Initialize services
-        theme_processor = ThemeBatchProcessor()
-        vault_manager = ObsidianVaultManager(settings.obsidian_vault_path)
-        note_generator = NoteGenerator()
+        # Phase 1: Contacts sync (skipped — no scope available)
+        logger.info("[%s] Skipping contacts sync (no contacts scope)", correlation_id)
+        merged_contacts = []
 
-        # Helper function to get credentials dict from account
-        def get_credentials_from_account(account: GmailAccount) -> dict:
-            """Extract credentials dict from GmailAccount for GmailClient."""
-            creds = json.loads(account.credentials)
-            # Map stored keys to what GmailClient expects
-            return {
-                "access_token": creds.get("token"),  # GmailClient expects "access_token"
-                "refresh_token": creds.get("refresh_token"),
-                "token_uri": creds.get("token_uri"),
-                "client_id": creds.get("client_id"),
-                "client_secret": creds.get("client_secret"),
-                "scopes": creds.get("scopes", []),
-            }
-
-        # ========================================
-        # PHASE 1: Skip Contacts (no scope available)
-        # ========================================
-        # TODO: Add contacts scope and re-enable contacts sync
-        logger.info(f"[{correlation_id}] Skipping contacts sync (no contacts scope)")
-        merged_contacts = []  # Empty list when skipping contacts
-
-        # ========================================
-        # PHASE 2: Sync Emails (0-40%)
-        # ========================================
+        # Phase 2: Sync emails
         self.update_progress("emails", 0, message="Fetching emails from Gmail accounts")
         job.phase = "emails"
         job.progress_pct = 15
         db.commit()
 
-        all_emails = []
-        total_emails_fetched = 0
-        total_emails_skipped = 0  # Track duplicates/already processed
+        db, job, all_emails = sync_emails_for_accounts(
+            db_factory=SessionLocal,
+            db=db,
+            job=job,
+            accounts=accounts,
+            user_id=user_id,
+            correlation_id=correlation_id,
+            progress_callback=self.update_progress,
+            get_credentials=_get_credentials_from_account,
+            get_last_date=get_last_processed_email_date,
+            get_oldest_date=get_oldest_processed_email_date,
+            get_existing_count=get_existing_email_count,
+        )
 
-        for i, account in enumerate(accounts):
-            # ========================================
-            # Check for existing emails (Resume Logic)
-            # ========================================
-            existing_count = get_existing_email_count(db, account.id)
-            oldest_email_date = get_oldest_processed_email_date(db, account.id)
-            newest_email_date = get_last_processed_email_date(db, account.id)
-
-            logger.info(
-                f"[{correlation_id}] Account {account.account_label} ({account.account_email}): "
-                f"{existing_count} emails already in database"
-            )
-
-            credentials = get_credentials_from_account(account)
-            gmail_client = GmailClient(credentials)
-
-            # ========================================
-            # DUAL SYNC STRATEGY: New Emails + Historical Backfill
-            # ========================================
-            # 1. FORWARD SYNC: Fetch NEW emails (after newest we have)
-            # 2. BACKWARD SYNC: Fetch HISTORICAL emails (before oldest we have)
-            # This ensures we catch both new arrivals AND fill historical gaps
-
-            queries_to_run = []
-
-            # GAP-FILL STRATEGY: If we have existing emails, specifically query CATEGORY labels
-            # that were missed during initial INBOX-only backfill
-            # Gmail categories: PROMOTIONS, SOCIAL, FORUMS, UPDATES
-            if oldest_email_date and newest_email_date:
-                # Query each category separately to be more targeted
-                for category in ["PROMOTIONS", "SOCIAL", "FORUMS", "UPDATES"]:
-                    queries_to_run.append({
-                        "query": f"label:CATEGORY_{category}",
-                        "description": f"gap-fill scan (CATEGORY_{category} emails missed in initial backfill)"
-                    })
-
-            if newest_email_date:
-                # Forward sync: Fetch emails AFTER the newest one (new emails)
-                # Use in:anywhere to include SENT, CATEGORY_*, and all labels
-                after_date_str = newest_email_date.strftime("%Y/%m/%d")
-                queries_to_run.append({
-                    "query": f"in:anywhere after:{after_date_str}",
-                    "description": f"forward sync (new emails after {after_date_str})"
-                })
-
-            if oldest_email_date:
-                # Backward sync: Fetch emails BEFORE the oldest one (historical backfill)
-                # Use in:anywhere to include SENT, CATEGORY_*, and all labels
-                before_date_str = oldest_email_date.strftime("%Y/%m/%d")
-                queries_to_run.append({
-                    "query": f"in:anywhere before:{before_date_str}",
-                    "description": f"historical backfill (old emails before {before_date_str})"
-                })
-
-            if not queries_to_run:
-                # First scan ever - fetch all emails from all labels
-                # Use in:anywhere to include INBOX, SENT, CATEGORY_*, and all labels
-                queries_to_run.append({
-                    "query": "in:anywhere",
-                    "description": "initial scan (all emails from all labels)"
-                })
-
-            logger.info(
-                f"[{correlation_id}] Running {len(queries_to_run)} sync strategies for "
-                f"{account.account_label}"
-            )
-
-            # Run each sync strategy (forward + backward)
-            for strategy in queries_to_run:
-                gmail_query = strategy["query"]
-                description = strategy["description"]
-
-                logger.info(
-                    f"[{correlation_id}] Starting {description} for {account.account_label}"
-                )
-
-                # Fetch emails with pagination
-                next_page_token = None
-                strategy_fetch_count = 0
-                email_dicts = []  # Initialize to prevent UnboundLocalError
-
-                while True:
-                    # Fetch message IDs (with date filter)
-                    message_ids, next_page_token = gmail_client.fetch_emails_chunked(
-                        batch_size=settings.gmail_batch_size,
-                        page_token=next_page_token,
-                        query=gmail_query,
-                    )
-
-                    if not message_ids:
-                        break
-
-                    logger.info(
-                        f"[{correlation_id}] Fetched {len(message_ids)} message IDs "
-                        f"({description})"
-                    )
-
-                    # Close DB session before long Gmail fetch to prevent connection timeout
-                    # Gmail fetch takes 2-3 min with rate limiting, causing Supabase to close idle connections
-                    db.close()
-
-                    # Fetch full message details (this takes several minutes)
-                    email_dicts = gmail_client.fetch_message_batch(message_ids, format="full")
-                    logger.info(
-                        f"[{correlation_id}] Fetched {len(email_dicts)} full messages "
-                        f"({description})"
-                    )
-
-                    # Reopen DB session for insertion
-                    db = SessionLocal()
-
-                    # Create Email objects
-                    for email_dict in email_dicts:
-                        email = Email(
-                            id=uuid.uuid4(),
-                            user_id=uuid.UUID(user_id),
-                            account_id=account.id,
-                            gmail_message_id=email_dict["gmail_message_id"],
-                            gmail_thread_id=email_dict.get("gmail_thread_id"),
-                            subject=email_dict.get("subject", ""),
-                            sender_email=email_dict.get("sender_email", ""),
-                            sender_name=email_dict.get("sender_name"),
-                            recipient_emails=email_dict.get("recipient_emails", ""),
-                            date=email_dict.get("date", datetime.utcnow()),
-                            summary=email_dict.get("snippet", "")[:500],  # 500-char summary
-                            body=email_dict.get("body"),
-                            has_attachments=email_dict.get("has_attachments", False),
-                            attachment_count=email_dict.get("attachment_count", 0),
-                        )
-                        all_emails.append(email)
-
-                    total_emails_fetched += len(email_dicts)
-                    strategy_fetch_count += len(email_dicts)
-
-                    # Insert this batch immediately (INSIDE pagination loop)
-                    # This prevents memory issues and provides faster feedback
-                    if email_dicts:
-                        try:
-                            # Get emails from this batch (last N emails in all_emails)
-                            batch_emails = all_emails[-len(email_dicts):]
-
-                            # Convert Email objects to dicts for insert
-                            email_dicts_for_insert = [
-                                {
-                                    "id": email.id,
-                                    "user_id": email.user_id,
-                                    "account_id": email.account_id,
-                                    "gmail_message_id": email.gmail_message_id,
-                                    "gmail_thread_id": email.gmail_thread_id,
-                                    "subject": email.subject,
-                                    "sender_email": email.sender_email,
-                                    "sender_name": email.sender_name,
-                                    "recipient_emails": email.recipient_emails,
-                                    "date": email.date,
-                                    "summary": email.summary,
-                                    "body": email.body,
-                                    "has_attachments": email.has_attachments,
-                                    "attachment_count": email.attachment_count,
-                                    "created_at": datetime.utcnow(),
-                                    "updated_at": datetime.utcnow(),
-                                }
-                                for email in batch_emails
-                            ]
-
-                            # INSERT ... ON CONFLICT DO NOTHING (skip duplicates)
-                            stmt = insert(Email).on_conflict_do_nothing(
-                                index_elements=["account_id", "gmail_message_id"]
-                            )
-                            db.execute(stmt, email_dicts_for_insert)
-                            db.commit()
-
-                            logger.info(
-                                f"[{correlation_id}] Inserted {len(email_dicts_for_insert)} emails "
-                                f"(duplicates automatically skipped)"
-                            )
-
-                        except Exception as e:
-                            logger.error(
-                                f"[{correlation_id}] Error inserting emails: {e}", exc_info=True
-                            )
-                            db.rollback()
-                            # Continue processing - don't crash on insert errors
-                            logger.warning(f"[{correlation_id}] Continuing after insert error...")
-
-                    # Update progress after insertion
-                    progress = int((i / len(accounts)) * 30 + (total_emails_fetched / 10000) * 10)
-                    progress = min(progress, 40)
-                    self.update_progress(
-                        "emails",
-                        progress,
-                        emails_processed=total_emails_fetched,
-                        message=f"Fetched {total_emails_fetched} emails",
-                    )
-                    job.progress_pct = progress
-                    job.emails_processed = total_emails_fetched
-                    db.commit()
-
-                    # Check if we should continue pagination
-                    if not next_page_token:
-                        break
-
-                # Log completion of this strategy
-                logger.info(
-                    f"[{correlation_id}] Completed {description}: fetched {strategy_fetch_count} emails"
-                )
-
-        logger.info(f"[{correlation_id}] Total emails fetched: {len(all_emails)}")
-        job.emails_total = len(all_emails)
-        db.commit()
-
-        # ========================================
-        # PHASE 4: Theme Detection (40-70%)
-        # ========================================
+        # Phase 4: Theme detection
         self.update_progress("themes", 40, message="Detecting themes with Claude AI")
         job.phase = "themes"
         job.progress_pct = 40
         db.commit()
 
-        # Process emails in batches for theme detection
-        batch_size = settings.claude_batch_size
-        email_batches = [
-            all_emails[i : i + batch_size] for i in range(0, len(all_emails), batch_size)
-        ]
+        theme_processor = ThemeBatchProcessor()
+        detect_themes(
+            db=db,
+            job=job,
+            all_emails=all_emails,
+            accounts=accounts,
+            theme_processor=theme_processor,
+            correlation_id=correlation_id,
+            progress_callback=self.update_progress,
+        )
 
-        for batch_idx, email_batch in enumerate(email_batches):
-            logger.info(
-                f"[{correlation_id}] Processing theme detection batch {batch_idx + 1}/"
-                f"{len(email_batches)} ({len(email_batch)} emails)"
-            )
+        # Phase 5: Vault generation (dev only)
+        vault_manager = ObsidianVaultManager(settings.obsidian_vault_path)
+        note_generator = NoteGenerator()
 
-            # Submit batch to Claude
-            batch_results = theme_processor.process_emails_sync(email_batch)
+        self.update_progress("vault", 70, message="Generating Obsidian vault")
+        job.phase = "vault"
+        job.progress_pct = 70
+        db.commit()
 
-            # Generate tags from themes
-            for email in email_batch:
-                email_id = str(email.id)
-                themes = batch_results.get(email_id)
+        generate_vault(
+            db=db,
+            job=job,
+            all_emails=all_emails,
+            merged_contacts=merged_contacts,
+            vault_manager=vault_manager,
+            note_generator=note_generator,
+            correlation_id=correlation_id,
+            progress_callback=self.update_progress,
+        )
 
-                if not themes:
-                    logger.warning(
-                        f"[{correlation_id}] No themes detected for email {email.id}"
-                    )
-                    continue
-
-                # Verify email exists in database (might be duplicate that was skipped)
-                email_exists = db.query(Email.id).filter(Email.id == email.id).first()
-                if not email_exists:
-                    logger.debug(
-                        f"[{correlation_id}] Skipping tags for duplicate email {email.id}"
-                    )
-                    continue
-
-                # Get account label for this email
-                account = next(
-                    (acc for acc in accounts if acc.id == email.account_id), None
-                )
-                account_label = account.account_label if account else "unknown"
-
-                # Generate tags
-                tags = generate_tags(themes, account_label)
-
-                # Create EmailTag records
-                for tag_dict in tags:
-                    email_tag = EmailTag(
-                        id=uuid.uuid4(),
-                        email_id=email.id,
-                        tag=tag_dict["tag"],
-                        tag_category=tag_dict["tag_category"],
-                        confidence=tag_dict.get("confidence"),
-                    )
-                    db.add(email_tag)
-
-            db.commit()
-
-            # Update progress
-            progress = int(40 + ((batch_idx + 1) / len(email_batches)) * 30)
-            self.update_progress(
-                "themes",
-                progress,
-                emails_processed=len(all_emails),
-                message=f"Processed {(batch_idx + 1) * batch_size} emails for themes",
-            )
-            job.progress_pct = progress
-            db.commit()
-
-        logger.info(f"[{correlation_id}] Theme detection complete for all emails")
-
-        # ========================================
-        # PHASE 5: Generate Vault (70-100%)
-        # ========================================
-        # Skip vault generation in production - vault is for local development only
-        # Heroku has read-only filesystem except /tmp, and vault isn't needed for database storage
-        if settings.is_development:
-            self.update_progress("vault", 70, message="Generating Obsidian vault")
-            job.phase = "vault"
-            job.progress_pct = 70
-            db.commit()
-
-            # Initialize vault
-            vault_manager.initialize_vault()
-            logger.info(f"[{correlation_id}] Vault initialized at {settings.obsidian_vault_path}")
-
-            # Group emails by contact
-            emails_by_contact = defaultdict(list)
-            for email in all_emails:
-                emails_by_contact[email.sender_email].append(email)
-
-            # Generate contact notes
-            self.update_progress("vault", 75, message="Generating contact notes")
-            for contact_idx, contact in enumerate(merged_contacts):
-                contact_emails = emails_by_contact.get(contact.email, [])
-
-                # Fetch tags for contact emails
-                email_ids = [e.id for e in contact_emails]
-                tags_query = db.query(EmailTag).filter(EmailTag.email_id.in_(email_ids)).all()
-
-                # Generate contact note
-                contact_note = note_generator.generate_contact_note(contact, contact_emails)
-
-                # Write to vault
-                contact_path = vault_manager.get_contact_path(contact.name or contact.email)
-                contact_path.write_text(contact_note)
-
-                # Update progress
-                if contact_idx % 10 == 0:
-                    progress = int(75 + (contact_idx / len(merged_contacts)) * 10)
-                    self.update_progress(
-                        "vault", progress, message=f"Generated {contact_idx} contact notes"
-                    )
-                    job.progress_pct = progress
-                    db.commit()
-
-            logger.info(f"[{correlation_id}] Generated {len(merged_contacts)} contact notes")
-
-            # Generate email notes
-            self.update_progress("vault", 85, message="Generating email notes")
-            for email_idx, email in enumerate(all_emails):
-                # Fetch tags for this email
-                tags = db.query(EmailTag).filter(EmailTag.email_id == email.id).all()
-                tag_strings = [f"{t.tag_category}/{t.tag}" for t in tags]
-
-                # Generate email note
-                email_note = note_generator.generate_email_note(email, tag_strings)
-
-                # Write to vault
-                email_path = vault_manager.get_email_path(email.date, email.subject or "Untitled")
-                vault_manager.ensure_email_directory(email.date)
-                email_path.write_text(email_note)
-
-                # Update progress
-                if email_idx % 100 == 0:
-                    progress = int(85 + (email_idx / len(all_emails)) * 15)
-                    self.update_progress(
-                        "vault", progress, message=f"Generated {email_idx} email notes"
-                    )
-                    job.progress_pct = progress
-                    db.commit()
-
-            logger.info(f"[{correlation_id}] Generated {len(all_emails)} email notes")
-
-        # ========================================
-        # COMPLETE
-        # ========================================
+        # Complete
         self.update_progress("completed", 100, message="Scan complete!")
         job.status = "completed"
         job.phase = "completed"
@@ -578,8 +204,8 @@ def scan_gmail_task(
         db.commit()
 
         logger.info(
-            f"[{correlation_id}] Gmail scan complete for user {user_id}. "
-            f"Processed {len(merged_contacts)} contacts and {len(all_emails)} emails."
+            "[%s] Gmail scan complete for user %s. Processed %d contacts and %d emails.",
+            correlation_id, user_id, len(merged_contacts), len(all_emails),
         )
 
         return {
@@ -592,7 +218,7 @@ def scan_gmail_task(
         }
 
     except Exception as e:
-        logger.error(f"[{correlation_id}] Error during Gmail scan: {str(e)}", exc_info=True)
+        logger.error("[%s] Error during Gmail scan: %s", correlation_id, e, exc_info=True)
 
         if job:
             job.status = "failed"

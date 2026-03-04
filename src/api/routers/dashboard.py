@@ -2,7 +2,10 @@
 Dashboard API routes for monitoring email processing stats.
 """
 
+import json
+import os
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import HTMLResponse
@@ -10,6 +13,7 @@ from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from src.api.middleware.auth import require_api_key
 from src.core.database import get_sync_db
 from src.core.logging import get_logger
 from src.models import Email, GmailAccount, SyncJob, GuardianEvent
@@ -18,13 +22,16 @@ logger = get_logger(__name__)
 
 router = APIRouter()
 
-# Gmail inbox totals (updated 2026-02-27)
-# These are queried from Gmail API offline to avoid rate limits
-GMAIL_TOTALS = {
-    "tooey@procore.com": 1049134,  # Updated from Gmail API profile.messagesTotal (2026-02-27)
-    "2e@procore.com": 87086,
-    "tooey@hth-corp.com": 26266,
-}
+def _load_gmail_totals() -> dict[str, int]:
+    """Load Gmail totals from GMAIL_TOTALS_JSON env var (queried offline to avoid rate limits)."""
+    raw = os.environ.get("GMAIL_TOTALS_JSON", "{}")
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+
+
+GMAIL_TOTALS = _load_gmail_totals()
 
 
 class AccountStats(BaseModel):
@@ -64,7 +71,7 @@ class EmailStatsResponse(BaseModel):
     monitor_events: list[MonitorEvent]
 
 
-@router.get("/stats", response_model=EmailStatsResponse)
+@router.get("/stats", response_model=EmailStatsResponse, dependencies=[Depends(require_api_key)])
 async def get_email_stats(db: Session = Depends(get_sync_db)) -> EmailStatsResponse:
     """
     Get current email processing statistics.
@@ -101,19 +108,40 @@ async def get_email_stats(db: Session = Depends(get_sync_db)) -> EmailStatsRespo
     accounts_list = []
     gmail_accounts = db.query(GmailAccount).filter(GmailAccount.is_active == True).all()
 
-    for account in gmail_accounts:
-        # Get DB count for this account
-        db_count = (
-            db.query(func.count(Email.id)).filter(Email.account_id == account.id).scalar() or 0
+    # Bulk query: count, min(date), max(date) per account in ONE query instead of 3 * N
+    account_stats_q = (
+        db.query(
+            Email.account_id,
+            func.count(Email.id).label("cnt"),
+            func.min(Email.date).label("oldest"),
+            func.max(Email.date).label("newest"),
         )
+        .group_by(Email.account_id)
+        .all()
+    )
+    stats_by_account = {
+        row.account_id: {"cnt": row.cnt, "oldest": row.oldest, "newest": row.newest}
+        for row in account_stats_q
+    }
 
-        # Get date range
-        oldest = (
-            db.query(func.min(Email.date)).filter(Email.account_id == account.id).scalar()
+    # Bulk query: recent email count per account (last 15 min) in ONE query
+    fifteen_min_ago = datetime.utcnow() - timedelta(minutes=15)
+    recent_stats_q = (
+        db.query(
+            Email.account_id,
+            func.count(Email.id).label("cnt"),
         )
-        newest = (
-            db.query(func.max(Email.date)).filter(Email.account_id == account.id).scalar()
-        )
+        .filter(Email.created_at >= fifteen_min_ago)
+        .group_by(Email.account_id)
+        .all()
+    )
+    recent_by_account = {row.account_id: row.cnt for row in recent_stats_q}
+
+    for account in gmail_accounts:
+        acct_stats = stats_by_account.get(account.id, {})
+        db_count = acct_stats.get("cnt", 0)
+        oldest = acct_stats.get("oldest")
+        newest = acct_stats.get("newest")
 
         # Get Gmail total from config (avoids API rate limits)
         gmail_total = GMAIL_TOTALS.get(account.account_email, 0)
@@ -124,13 +152,7 @@ async def get_email_stats(db: Session = Depends(get_sync_db)) -> EmailStatsRespo
             progress_pct = (db_count / gmail_total) * 100
 
         # Calculate emails per minute (last 15 minutes)
-        fifteen_min_ago = datetime.utcnow() - timedelta(minutes=15)
-        recent_count = (
-            db.query(func.count(Email.id))
-            .filter(Email.account_id == account.id, Email.created_at >= fifteen_min_ago)
-            .scalar()
-            or 0
-        )
+        recent_count = recent_by_account.get(account.id, 0)
         emails_per_minute = round(recent_count / 15.0, 1) if recent_count > 0 else 0.0
 
         # Calculate estimated completion time
@@ -214,456 +236,11 @@ async def get_email_stats(db: Session = Depends(get_sync_db)) -> EmailStatsRespo
     )
 
 
+_WIDGET_HTML_PATH = Path(__file__).resolve().parent.parent.parent / "static" / "dashboard" / "widget.html"
+
+
 @router.get("/widget", response_class=HTMLResponse)
 async def get_widget() -> str:
-    """
-    Get embeddable HTML widget for dashboard.
+    """Get embeddable HTML widget for dashboard."""
+    return _WIDGET_HTML_PATH.read_text()
 
-    Returns:
-        Self-contained HTML widget with auto-refresh and per-account stats
-    """
-    return """
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Email Processing Stats</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            display: flex;
-            justify-content: center;
-            align-items: flex-start;
-            min-height: 100vh;
-            padding: 20px;
-        }
-
-        .widget {
-            background: white;
-            border-radius: 20px;
-            padding: 30px;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-            max-width: 700px;
-            width: 100%;
-        }
-
-        .title {
-            font-size: 24px;
-            font-weight: 700;
-            color: #2d3748;
-            margin-bottom: 20px;
-            text-align: center;
-        }
-
-        .account-card {
-            margin-bottom: 20px;
-            padding: 20px;
-            background: linear-gradient(135deg, #f6f8fb 0%, #eef1f5 100%);
-            border-radius: 12px;
-            border-left: 4px solid #667eea;
-        }
-
-        .account-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 15px;
-        }
-
-        .account-label {
-            font-size: 16px;
-            font-weight: 700;
-            color: #2d3748;
-        }
-
-        .account-email {
-            font-size: 12px;
-            color: #718096;
-        }
-
-        .progress-bar-container {
-            width: 100%;
-            height: 8px;
-            background: #e2e8f0;
-            border-radius: 4px;
-            overflow: hidden;
-            margin-bottom: 10px;
-        }
-
-        .progress-bar {
-            height: 100%;
-            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
-            transition: width 0.3s ease;
-        }
-
-        .account-stats {
-            display: grid;
-            grid-template-columns: repeat(5, 1fr);
-            gap: 15px;
-            font-size: 13px;
-        }
-
-        .stat-item {
-            text-align: center;
-        }
-
-        .stat-item-label {
-            color: #718096;
-            font-size: 11px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            margin-bottom: 4px;
-        }
-
-        .stat-item-value {
-            color: #2d3748;
-            font-size: 18px;
-            font-weight: 700;
-        }
-
-        .total-card {
-            padding: 20px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            border-radius: 12px;
-            color: white;
-            text-align: center;
-            margin-bottom: 20px;
-        }
-
-        .total-label {
-            font-size: 12px;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            opacity: 0.9;
-            margin-bottom: 8px;
-        }
-
-        .total-value {
-            font-size: 36px;
-            font-weight: 800;
-        }
-
-        .status {
-            display: flex;
-            align-items: center;
-            padding: 15px 20px;
-            background: #f7fafc;
-            border-radius: 10px;
-        }
-
-        .status-dot {
-            width: 12px;
-            height: 12px;
-            border-radius: 50%;
-            margin-right: 12px;
-            animation: pulse 2s infinite;
-        }
-
-        .status-dot.active {
-            background: #48bb78;
-        }
-
-        .status-dot.idle {
-            background: #a0aec0;
-        }
-
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
-        }
-
-        .status-text {
-            font-size: 14px;
-            font-weight: 600;
-            color: #4a5568;
-        }
-
-        .updated {
-            text-align: center;
-            font-size: 12px;
-            color: #a0aec0;
-            margin-top: 15px;
-        }
-
-        .error {
-            color: #f56565;
-            text-align: center;
-            padding: 20px;
-        }
-
-        .monitor-section {
-            margin-top: 20px;
-            padding: 20px;
-            background: #f7fafc;
-            border-radius: 10px;
-            border-top: 2px solid #e2e8f0;
-        }
-
-        .monitor-title {
-            font-size: 14px;
-            font-weight: 700;
-            color: #2d3748;
-            margin-bottom: 15px;
-            display: flex;
-            align-items: center;
-        }
-
-        .monitor-title::before {
-            content: '🔍';
-            margin-right: 8px;
-        }
-
-        .monitor-events {
-            max-height: 200px;
-            overflow-y: auto;
-        }
-
-        .monitor-event {
-            padding: 10px;
-            margin-bottom: 8px;
-            background: white;
-            border-radius: 6px;
-            border-left: 3px solid #cbd5e0;
-            font-size: 12px;
-        }
-
-        .monitor-event.monitor_started {
-            border-left-color: #48bb78;
-        }
-
-        .monitor-event.stall_detected {
-            border-left-color: #f56565;
-        }
-
-        .monitor-event.scan_restarted {
-            border-left-color: #ed8936;
-        }
-
-        .monitor-event.slow_processing {
-            border-left-color: #ecc94b;
-        }
-
-        .monitor-event.restart_failed {
-            border-left-color: #e53e3e;
-        }
-
-        .event-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 5px;
-        }
-
-        .event-type {
-            font-weight: 600;
-            color: #4a5568;
-            text-transform: capitalize;
-        }
-
-        .event-time {
-            font-size: 11px;
-            color: #a0aec0;
-        }
-
-        .event-description {
-            color: #718096;
-            line-height: 1.4;
-        }
-
-        .event-account {
-            display: inline-block;
-            margin-top: 5px;
-            padding: 2px 8px;
-            background: #edf2f7;
-            border-radius: 4px;
-            font-size: 10px;
-            color: #4a5568;
-            font-weight: 600;
-        }
-    </style>
-</head>
-<body>
-    <div class="widget">
-        <div class="title">📧 Email Processing Dashboard</div>
-
-        <div id="content">
-            <div class="total-card">
-                <div class="total-label">Total Emails Processed</div>
-                <div class="total-value" id="total">...</div>
-            </div>
-
-            <div id="accounts-container"></div>
-
-            <div class="status">
-                <div class="status-dot" id="status-dot"></div>
-                <div class="status-text" id="status-text">Loading...</div>
-            </div>
-
-            <div class="monitor-section">
-                <div class="monitor-title">Monitor Activity</div>
-                <div class="monitor-events" id="monitor-events">
-                    <div style="text-align: center; color: #a0aec0; padding: 20px;">
-                        Loading monitor activity...
-                    </div>
-                </div>
-            </div>
-
-            <div class="updated" id="updated">Updated just now</div>
-        </div>
-
-        <div id="error" class="error" style="display: none;"></div>
-    </div>
-
-    <script>
-        const API_URL = window.location.origin + '/dashboard/stats';
-
-        function formatNumber(num) {
-            return num ? num.toLocaleString() : '0';
-        }
-
-        function renderMonitorEvents(events) {
-            const container = document.getElementById('monitor-events');
-
-            if (!events || events.length === 0) {
-                container.innerHTML = '<div style="text-align: center; color: #a0aec0; padding: 20px;">No recent monitor activity</div>';
-                return;
-            }
-
-            container.innerHTML = events.map(event => {
-                const accountBadge = event.account_email
-                    ? `<div class="event-account">${event.account_email}</div>`
-                    : '';
-
-                return `
-                    <div class="monitor-event ${event.event_type}">
-                        <div class="event-header">
-                            <div class="event-type">${event.event_type.replace(/_/g, ' ')}</div>
-                            <div class="event-time">${event.time_ago}</div>
-                        </div>
-                        <div class="event-description">${event.description}</div>
-                        ${accountBadge}
-                    </div>
-                `;
-            }).join('');
-        }
-
-        function renderAccounts(accounts) {
-            const container = document.getElementById('accounts-container');
-            container.innerHTML = '';
-
-            accounts.forEach(account => {
-                const card = document.createElement('div');
-                card.className = 'account-card';
-
-                const gmailTotal = account.gmail_total || 0;
-                const dbCount = account.db_count || 0;
-                const progressPct = account.progress_pct || 0;
-                const remaining = gmailTotal - dbCount;
-                const emailsPerMin = account.emails_per_minute || 0;
-                const estimatedCompletion = account.estimated_completion || 'N/A';
-
-                card.innerHTML = `
-                    <div class="account-header">
-                        <div>
-                            <div class="account-label">${account.account_label}</div>
-                            <div class="account-email">${account.account_email}</div>
-                        </div>
-                        <div style="font-size: 18px; font-weight: 700; color: #667eea;">
-                            ${progressPct.toFixed(1)}%
-                        </div>
-                    </div>
-                    <div class="progress-bar-container">
-                        <div class="progress-bar" style="width: ${progressPct}%"></div>
-                    </div>
-                    <div class="account-stats">
-                        <div class="stat-item">
-                            <div class="stat-item-label">Gmail Total</div>
-                            <div class="stat-item-value">${formatNumber(gmailTotal)}</div>
-                        </div>
-                        <div class="stat-item">
-                            <div class="stat-item-label">Processed</div>
-                            <div class="stat-item-value">${formatNumber(dbCount)}</div>
-                        </div>
-                        <div class="stat-item">
-                            <div class="stat-item-label">Remaining</div>
-                            <div class="stat-item-value">${formatNumber(remaining)}</div>
-                        </div>
-                        <div class="stat-item">
-                            <div class="stat-item-label">Emails/Min</div>
-                            <div class="stat-item-value">${emailsPerMin.toFixed(1)}</div>
-                        </div>
-                        <div class="stat-item">
-                            <div class="stat-item-label">ETA</div>
-                            <div class="stat-item-value">${estimatedCompletion}</div>
-                        </div>
-                    </div>
-                `;
-
-                container.appendChild(card);
-            });
-        }
-
-        async function updateStats() {
-            try {
-                const response = await fetch(API_URL);
-                if (!response.ok) throw new Error('Failed to fetch stats');
-
-                const data = await response.json();
-
-                // Update total emails
-                document.getElementById('total').textContent = formatNumber(data.total_emails);
-
-                // Render account cards
-                if (data.accounts && data.accounts.length > 0) {
-                    renderAccounts(data.accounts);
-                }
-
-                // Render monitor events
-                if (data.monitor_events) {
-                    renderMonitorEvents(data.monitor_events);
-                }
-
-                // Update status
-                const statusDot = document.getElementById('status-dot');
-                const statusText = document.getElementById('status-text');
-
-                if (data.active_scans > 0) {
-                    statusDot.className = 'status-dot active';
-                    statusText.textContent = `Active scan in progress (${data.current_job_progress}%)`;
-                } else {
-                    statusDot.className = 'status-dot idle';
-                    statusText.textContent = 'No active scans';
-                }
-
-                // Update timestamp
-                const now = new Date().toLocaleTimeString();
-                document.getElementById('updated').textContent = `Updated at ${now}`;
-
-                // Hide error, show content
-                document.getElementById('error').style.display = 'none';
-                document.getElementById('content').style.display = 'block';
-
-            } catch (error) {
-                console.error('Error fetching stats:', error);
-                document.getElementById('error').textContent = 'Failed to load stats. Retrying...';
-                document.getElementById('error').style.display = 'block';
-            }
-        }
-
-        // Initial load
-        updateStats();
-
-        // Refresh every 10 seconds
-        setInterval(updateStats, 10000);
-    </script>
-</body>
-</html>
-"""

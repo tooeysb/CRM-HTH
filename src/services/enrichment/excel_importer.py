@@ -3,14 +3,15 @@ Excel importer for CRM enrichment data.
 Parses multi-tab spreadsheets with per-tab column normalization.
 """
 
-import logging
 import re
 from datetime import date, datetime
 from pathlib import Path
 
 from openpyxl import load_workbook
 
-logger = logging.getLogger(__name__)
+from src.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 # Mapping of normalized header keywords to canonical field names, per tab.
 # Each tab has a dict of {canonical_key: [possible_header_substrings]}.
