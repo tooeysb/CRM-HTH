@@ -25,6 +25,7 @@ function crmApp() {
         },
 
         // Companies
+        _editingCompanyId: null,
         companies: {
             loading: true,
             items: [],
@@ -606,6 +607,20 @@ function crmApp() {
             if (result && this.detail.data?.company) {
                 this.detail.data.company[field] = value || null;
             }
+        },
+
+        async saveCompanyFieldInline(companyId, field, value) {
+            const body = {};
+            body[field] = value || null;
+            const result = await this.apiFetch('companies/' + companyId, {
+                method: 'PATCH',
+                body: JSON.stringify(body),
+            });
+            if (result) {
+                const item = this.companies.items.find(c => c.id === companyId);
+                if (item) item[field] = value || null;
+            }
+            this._editingCompanyId = null;
         },
 
         // ==================== VIP TOGGLE ====================

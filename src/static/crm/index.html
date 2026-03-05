@@ -656,11 +656,31 @@
                                                 <div class="text-xs text-gray-500 truncate" x-text="c.domain || ''"></div>
                                             </div>
                                         </td>
-                                        <td class="px-5 py-3 hidden md:table-cell">
-                                            <template x-if="c.company_type">
-                                                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium"
-                                                    :class="companyTypeBadge(c.company_type)"
-                                                    x-text="c.company_type"></span>
+                                        <td class="px-5 py-3 hidden md:table-cell" @click.stop>
+                                            <template x-if="_editingCompanyId !== c.id">
+                                                <button @click="_editingCompanyId = c.id"
+                                                    class="cursor-pointer hover:opacity-75" :title="'Click to change type'">
+                                                    <template x-if="c.company_type">
+                                                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium"
+                                                            :class="companyTypeBadge(c.company_type)"
+                                                            x-text="c.company_type"></span>
+                                                    </template>
+                                                    <template x-if="!c.company_type">
+                                                        <span class="text-xs text-gray-400">Set type</span>
+                                                    </template>
+                                                </button>
+                                            </template>
+                                            <template x-if="_editingCompanyId === c.id">
+                                                <select :value="c.company_type || ''"
+                                                    @change="saveCompanyFieldInline(c.id, 'company_type', $event.target.value)"
+                                                    @blur="_editingCompanyId = null"
+                                                    x-init="$nextTick(() => $el.focus())"
+                                                    class="text-xs border border-primary-300 rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-primary-500">
+                                                    <option value="">None</option>
+                                                    <option value="General Contractor">General Contractor</option>
+                                                    <option value="Owner">Owner</option>
+                                                    <option value="Specialty Contractor">Specialty Contractor</option>
+                                                </select>
                                             </template>
                                         </td>
                                         <td class="px-5 py-3 hidden md:table-cell">
@@ -2288,7 +2308,24 @@
                                     <div class="grid grid-cols-2 gap-4">
                                         <div>
                                             <label class="text-xs font-medium text-gray-500 uppercase tracking-wider">Type</label>
-                                            <p class="mt-1 text-sm text-gray-900" x-text="detail.data.company.company_type || '-'"></p>
+                                            <div class="mt-1">
+                                                <template x-if="editing.field !== 'company_type'">
+                                                    <button @click="startEditing('company_type', detail.data.company.company_type || '')"
+                                                        class="text-sm text-gray-900 cursor-pointer hover:bg-gray-50 rounded px-1 -mx-1 py-0.5">
+                                                        <span x-text="detail.data.company.company_type || 'Set type'"></span>
+                                                    </button>
+                                                </template>
+                                                <template x-if="editing.field === 'company_type'">
+                                                    <select x-model="editing.value"
+                                                        @change="saveCompanyField('company_type')" @blur="cancelEditing()"
+                                                        class="w-full text-sm border border-primary-300 rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-primary-500">
+                                                        <option value="">None</option>
+                                                        <option value="General Contractor">General Contractor</option>
+                                                        <option value="Owner">Owner</option>
+                                                        <option value="Specialty Contractor">Specialty Contractor</option>
+                                                    </select>
+                                                </template>
+                                            </div>
                                         </div>
                                         <div>
                                             <label class="text-xs font-medium text-gray-500 uppercase tracking-wider">Tier</label>
