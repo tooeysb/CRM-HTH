@@ -57,6 +57,7 @@ function crmApp() {
         // Reports
         reports: {
             loading: false,
+            selected: 'needsLinkedIn',
             challengingNames: [],
             companiesWithoutPeople: [],
             needsLinkedIn: [],
