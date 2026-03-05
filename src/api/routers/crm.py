@@ -1031,15 +1031,76 @@ def _expand_nickname(name: str) -> str | None:
     return None
 
 
+def _parse_linkedin_title_parts(raw_title: str, name: str | None) -> str | None:
+    """Extract job title from a LinkedIn-style title string like 'Name - Title - Company | LinkedIn'."""
+    raw_title = raw_title.split(" | ")[0].strip()
+    parts = [p.strip() for p in raw_title.split(" - ")]
+
+    if len(parts) >= 3:
+        title = " - ".join(parts[1:-1])
+        if title and title.lower() not in ("linkedin", ""):
+            _logger.info("LinkedIn found title for %s: %s", name, title)
+            return title
+    elif len(parts) == 2:
+        candidate = parts[1]
+        if candidate and candidate.lower() not in ("linkedin", ""):
+            _logger.info("LinkedIn found title for %s: %s", name, candidate)
+            return candidate
+    return None
+
+
 def _scrape_linkedin_title(linkedin_url: str, name: str | None) -> str | None:
-    """Search DuckDuckGo for a known LinkedIn URL and extract the title from the result."""
-    # Extract the profile slug (e.g., "david-burns-5727331") for the search
-    slug = linkedin_url.rstrip("/").split("/")[-1]
-    query = f"site:linkedin.com/in/{slug}"
-    url = f"https://html.duckduckgo.com/html/?q={quote_plus(query)}"
+    """Fetch a LinkedIn profile directly and extract the job title from page metadata.
+
+    LinkedIn serves <title> and og:title tags even to bots, formatted as:
+      "Name - Title - Company | LinkedIn"
+    Falls back to DuckDuckGo search if direct fetch fails.
+    """
+    # Normalize URL
+    li_url = linkedin_url.strip().rstrip("/")
+    if not li_url.startswith("http"):
+        li_url = "https://" + li_url
+
+    # Step 1: Fetch the LinkedIn page directly — they serve metadata to bots
     try:
         resp = httpx.get(
-            url,
+            li_url,
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
+                ),
+                "Accept": "text/html",
+                "Accept-Language": "en-US,en;q=0.9",
+            },
+            timeout=8,
+            follow_redirects=True,
+        )
+        if resp.status_code == 200:
+            soup = BeautifulSoup(resp.text, "lxml")
+            # Try <title> tag first
+            title_tag = soup.find("title")
+            if title_tag:
+                result = _parse_linkedin_title_parts(title_tag.get_text(), name)
+                if result:
+                    return result
+            # Try og:title meta tag
+            og_title = soup.find("meta", property="og:title")
+            if og_title and og_title.get("content"):
+                result = _parse_linkedin_title_parts(og_title["content"], name)
+                if result:
+                    return result
+        else:
+            _logger.info("LinkedIn direct fetch returned %s for %s", resp.status_code, li_url)
+    except Exception:
+        _logger.warning("LinkedIn direct fetch failed for %s", li_url, exc_info=True)
+
+    # Step 2: Fall back to DuckDuckGo search
+    slug = li_url.rstrip("/").split("/")[-1]
+    query = f"site:linkedin.com/in/{slug}"
+    ddg_url = f"https://html.duckduckgo.com/html/?q={quote_plus(query)}"
+    try:
+        resp = httpx.get(
+            ddg_url,
             headers={"User-Agent": "Mozilla/5.0 (compatible; CRM-HTH/1.0)"},
             timeout=6,
             follow_redirects=True,
@@ -1056,25 +1117,11 @@ def _scrape_linkedin_title(linkedin_url: str, name: str | None) -> str | None:
             link_text = link_el.get_text().strip() if link_el else ""
             if "linkedin.com/in/" not in link_text:
                 continue
-
-            raw_title = title_el.get_text().strip()
-            raw_title = raw_title.split(" | ")[0].strip()
-            parts = [p.strip() for p in raw_title.split(" - ")]
-
-            if len(parts) >= 3:
-                title = " - ".join(parts[1:-1])
-                if title and title.lower() not in ("linkedin", ""):
-                    _logger.info("LinkedIn URL lookup found title for %s: %s", name, title)
-                    return title
-            elif len(parts) == 2:
-                candidate = parts[1]
-                if candidate and candidate.lower() not in ("linkedin", ""):
-                    _logger.info("LinkedIn URL lookup found title for %s: %s", name, candidate)
-                    return candidate
+            return _parse_linkedin_title_parts(title_el.get_text().strip(), name)
 
         return None
     except Exception:
-        _logger.warning("LinkedIn URL lookup failed for %s", linkedin_url, exc_info=True)
+        _logger.warning("LinkedIn DuckDuckGo fallback failed for %s", li_url, exc_info=True)
         return None
 
 
