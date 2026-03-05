@@ -99,7 +99,9 @@ class DomainContactDiscoverer:
     def _load_company_domains(self) -> dict[str, UUID]:
         """Build {lowercase_domain: company_id} lookup."""
         stmt = select(Company.id, Company.domain).where(
-            Company.user_id == self.user_id, Company.domain.isnot(None)
+            Company.user_id == self.user_id,
+            Company.domain.isnot(None),
+            Company.deleted_at.is_(None),
         )
         rows = self.db.execute(stmt).all()
         result = {}

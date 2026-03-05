@@ -414,6 +414,27 @@ function crmApp() {
             this.$nextTick(() => { window.scrollTo(0, this._savedScrollY); });
         },
 
+        async deleteCompany(id) {
+            const name = this.detail.data?.name || 'this company';
+            if (!confirm(`Delete "${name}" and all its contacts? This cannot be undone.`)) return;
+            const result = await this.apiFetch('companies/' + id, { method: 'DELETE' });
+            if (result) {
+                this.closeDetail();
+                this.loadCompanies();
+                this.loadNoContact();
+            }
+        },
+
+        async deleteContact(id) {
+            const name = this.detail.data?.name || this.detail.data?.email || 'this contact';
+            if (!confirm(`Delete "${name}"? This cannot be undone.`)) return;
+            const result = await this.apiFetch('contacts/' + id, { method: 'DELETE' });
+            if (result) {
+                this.closeDetail();
+                this.loadContacts();
+            }
+        },
+
         // ==================== CONTACT EMAILS ====================
         async loadContactEmails(id, reset = false) {
             if (reset) {

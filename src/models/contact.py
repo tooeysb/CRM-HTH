@@ -131,6 +131,10 @@ class Contact(Base, UUIDMixin, TimestampMixin):
         comment="Timestamp of most recent email with this contact",
     )
 
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, comment="Soft delete timestamp"
+    )
+
     # Relationships
     user: Mapped["User"] = relationship("User", back_populates="contacts")
 

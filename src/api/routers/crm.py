@@ -4,6 +4,7 @@ CRM API routes for contact and company management.
 
 import re
 import uuid
+from datetime import datetime
 from urllib.parse import quote_plus
 
 import httpx
@@ -272,8 +273,18 @@ def crm_dashboard(user: User = Depends(get_current_user), db: Session = Depends(
     """CRM dashboard with aggregate statistics."""
     uid = user.id
 
-    total_contacts = db.query(func.count(Contact.id)).filter(Contact.user_id == uid).scalar() or 0
-    total_companies = db.query(func.count(Company.id)).filter(Company.user_id == uid).scalar() or 0
+    total_contacts = (
+        db.query(func.count(Contact.id))
+        .filter(Contact.user_id == uid, Contact.deleted_at.is_(None))
+        .scalar()
+        or 0
+    )
+    total_companies = (
+        db.query(func.count(Company.id))
+        .filter(Company.user_id == uid, Company.deleted_at.is_(None))
+        .scalar()
+        or 0
+    )
     total_emails = db.query(func.count(Email.id)).filter(Email.user_id == uid).scalar() or 0
     vip_count = (
         db.query(func.count(Contact.id))
@@ -367,7 +378,7 @@ def list_contacts(
         db.query(Contact)
         .options(selectinload(Contact.company))
         .outerjoin(Company, Contact.company_id == Company.id)
-        .filter(Contact.user_id == uid)
+        .filter(Contact.user_id == uid, Contact.deleted_at.is_(None))
     )
 
     # Filters
@@ -468,7 +479,7 @@ def get_contact(
     contact = (
         db.query(Contact)
         .options(selectinload(Contact.company))
-        .filter(Contact.id == contact_id, Contact.user_id == uid)
+        .filter(Contact.id == contact_id, Contact.user_id == uid, Contact.deleted_at.is_(None))
         .first()
     )
     if not contact:
@@ -627,6 +638,31 @@ def update_contact(
 
 
 # ---------------------------------------------------------------------------
+# DELETE /contacts/{id}
+# ---------------------------------------------------------------------------
+
+
+@router.delete("/contacts/{contact_id}")
+def delete_contact(
+    contact_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_sync_db),
+):
+    """Soft-delete a contact (sets deleted_at timestamp)."""
+    uid = user.id
+    contact = (
+        db.query(Contact)
+        .filter(Contact.id == contact_id, Contact.user_id == uid, Contact.deleted_at.is_(None))
+        .first()
+    )
+    if not contact:
+        raise HTTPException(status_code=404, detail="Contact not found")
+
+    contact.deleted_at = datetime.utcnow()
+    db.commit()
+    return {"status": "deleted"}
+
+
 # POST /contacts/{id}/enrich-title
 # ---------------------------------------------------------------------------
 
@@ -807,7 +843,11 @@ def list_companies(
             Contact.company_id,
             func.count(Contact.id).label("contact_count"),
         )
-        .filter(Contact.user_id == uid, Contact.company_id.isnot(None))
+        .filter(
+            Contact.user_id == uid,
+            Contact.company_id.isnot(None),
+            Contact.deleted_at.is_(None),
+        )
         .group_by(Contact.company_id)
         .subquery()
     )
@@ -830,7 +870,7 @@ def list_companies(
         db.query(Company, cc_col.label("contact_count"), dc_col.label("discovered_count"))
         .outerjoin(contact_count_sq, Company.id == contact_count_sq.c.company_id)
         .outerjoin(discovered_count_sq, Company.id == discovered_count_sq.c.company_id)
-        .filter(Company.user_id == uid)
+        .filter(Company.user_id == uid, Company.deleted_at.is_(None))
     )
 
     # Filter by email activity
@@ -892,14 +932,22 @@ def get_company(
     """Get full company detail with contacts and email summary."""
     uid = user.id
 
-    company = db.query(Company).filter(Company.id == company_id, Company.user_id == uid).first()
+    company = (
+        db.query(Company)
+        .filter(Company.id == company_id, Company.user_id == uid, Company.deleted_at.is_(None))
+        .first()
+    )
     if not company:
         raise HTTPException(status_code=404, detail="Company not found")
 
     # Contacts at this company
     contacts = (
         db.query(Contact)
-        .filter(Contact.user_id == uid, Contact.company_id == company.id)
+        .filter(
+            Contact.user_id == uid,
+            Contact.company_id == company.id,
+            Contact.deleted_at.is_(None),
+        )
         .order_by(Contact.email_count.desc())
         .all()
     )
@@ -1638,6 +1686,41 @@ def update_company(
 
 # ---------------------------------------------------------------------------
 # GET /search
+# ---------------------------------------------------------------------------
+# DELETE /companies/{id}
+# ---------------------------------------------------------------------------
+
+
+@router.delete("/companies/{company_id}")
+def delete_company(
+    company_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_sync_db),
+):
+    """Soft-delete a company and all its contacts."""
+    uid = user.id
+    company = (
+        db.query(Company)
+        .filter(Company.id == company_id, Company.user_id == uid, Company.deleted_at.is_(None))
+        .first()
+    )
+    if not company:
+        raise HTTPException(status_code=404, detail="Company not found")
+
+    now = datetime.utcnow()
+    company.deleted_at = now
+
+    # Also soft-delete all contacts at this company
+    deleted_contacts = (
+        db.query(Contact)
+        .filter(Contact.company_id == company.id, Contact.deleted_at.is_(None))
+        .update({"deleted_at": now})
+    )
+
+    db.commit()
+    return {"status": "deleted", "contacts_deleted": deleted_contacts}
+
+
 # ---------------------------------------------------------------------------
 
 

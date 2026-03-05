@@ -1391,10 +1391,16 @@
                 x-transition:leave-end="translate-x-full"
                 class="absolute right-0 top-0 bottom-0 w-full md:w-1/2 bg-white shadow-xl border-l border-gray-200 overflow-y-auto">
 
-                <!-- Close -->
-                <button @click="closeDetail()" class="absolute top-4 right-4 p-1.5 rounded-lg hover:bg-gray-100 transition-colors z-10">
-                    <svg class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
-                </button>
+                <!-- Close + Delete -->
+                <div class="absolute top-4 right-4 flex items-center gap-1 z-10">
+                    <button @click="detail.type === 'company' ? deleteCompany(detail.id) : deleteContact(detail.id)"
+                        class="p-1.5 rounded-lg hover:bg-red-50 transition-colors" title="Delete">
+                        <svg class="w-5 h-5 text-red-400 hover:text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                    </button>
+                    <button @click="closeDetail()" class="p-1.5 rounded-lg hover:bg-gray-100 transition-colors">
+                        <svg class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                    </button>
+                </div>
 
                 <!-- Loading -->
                 <template x-if="detail.loading">
