@@ -55,17 +55,17 @@
                             <button @click="navigate('companies')"
                                 :class="currentView === 'companies' ? 'bg-primary-50 text-primary-700' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'"
                                 class="px-3 py-1.5 rounded-md text-sm font-medium transition-colors">
-                                Companies
+                                Companies (<span x-text="formatNumber(companies.total)"></span>)
                             </button>
                             <button @click="navigate('contacts')"
                                 :class="currentView === 'contacts' ? 'bg-primary-50 text-primary-700' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'"
                                 class="px-3 py-1.5 rounded-md text-sm font-medium transition-colors">
-                                People
+                                People (<span x-text="formatNumber(contacts.total)"></span>)
                             </button>
                             <button @click="navigate('noContact')"
                                 :class="currentView === 'noContact' ? 'bg-primary-50 text-primary-700' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'"
                                 class="px-3 py-1.5 rounded-md text-sm font-medium transition-colors">
-                                No-Contact
+                                No-Contact (<span x-text="formatNumber(noContact.total)"></span>)
                             </button>
                             <button @click="navigate('reports')"
                                 :class="currentView === 'reports' ? 'bg-primary-50 text-primary-700' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'"
@@ -344,7 +344,10 @@
                             <input type="text" x-model="contacts.search"
                                 @input.debounce.300ms="contacts.page = 1; loadContacts()"
                                 placeholder="Search people..."
-                                class="w-full pl-9 pr-4 py-2 text-sm bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent">
+                                class="w-full pl-9 pr-9 py-2 text-sm bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent">
+                            <button x-show="contacts.search" @click="contacts.search = ''; contacts.page = 1; loadContacts()" class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                            </button>
                         </div>
                         <div class="flex items-center gap-2 flex-wrap">
                             <button @click="contacts.filters.is_vip = contacts.filters.is_vip ? null : true; contacts.page = 1; loadContacts()"
@@ -512,7 +515,7 @@
                     </template>
 
                     <!-- Pagination -->
-                    <div x-show="contacts.totalPages > 1" class="flex items-center justify-between px-5 py-3 border-t border-gray-100">
+                    <div x-show="contacts.total > 0" class="flex items-center justify-between px-5 py-3 border-t border-gray-100">
                         <div class="text-sm text-gray-500">
                             Showing <span x-text="((contacts.page - 1) * contacts.pageSize) + 1"></span>-<span x-text="Math.min(contacts.page * contacts.pageSize, contacts.total)"></span> of <span x-text="formatNumber(contacts.total)"></span>
                         </div>
@@ -547,7 +550,10 @@
                             <input type="text" x-model="companies.search"
                                 @input.debounce.300ms="companies.page = 1; loadCompanies()"
                                 placeholder="Search companies..."
-                                class="w-full pl-9 pr-4 py-2 text-sm bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent">
+                                class="w-full pl-9 pr-9 py-2 text-sm bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent">
+                            <button x-show="companies.search" @click="companies.search = ''; companies.page = 1; loadCompanies()" class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                            </button>
                         </div>
                         <div class="flex items-center gap-2">
                             <select x-model="companies.filters.company_type"
@@ -690,7 +696,7 @@
                     </template>
 
                     <!-- Pagination -->
-                    <div x-show="companies.totalPages > 1" class="flex items-center justify-between px-5 py-3 border-t border-gray-100">
+                    <div x-show="companies.total > 0" class="flex items-center justify-between px-5 py-3 border-t border-gray-100">
                         <div class="text-sm text-gray-500">
                             Showing <span x-text="((companies.page - 1) * companies.pageSize) + 1"></span>-<span x-text="Math.min(companies.page * companies.pageSize, companies.total)"></span> of <span x-text="formatNumber(companies.total)"></span>
                         </div>
@@ -723,7 +729,10 @@
                             <input type="text" x-model="noContact.search"
                                 @input.debounce.300ms="noContact.page = 1; loadNoContact()"
                                 placeholder="Search no-contact companies..."
-                                class="w-full pl-9 pr-4 py-2 text-sm bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent">
+                                class="w-full pl-9 pr-9 py-2 text-sm bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent">
+                            <button x-show="noContact.search" @click="noContact.search = ''; noContact.page = 1; loadNoContact()" class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                            </button>
                         </div>
                         <div class="text-sm text-gray-500">
                             <span x-text="formatNumber(noContact.total)"></span> companies with no email activity
@@ -847,7 +856,7 @@
                     </template>
 
                     <!-- Pagination -->
-                    <div x-show="noContact.totalPages > 1" class="flex items-center justify-between px-5 py-3 border-t border-gray-100">
+                    <div x-show="noContact.total > 0" class="flex items-center justify-between px-5 py-3 border-t border-gray-100">
                         <div class="text-sm text-gray-500">
                             Showing <span x-text="((noContact.page - 1) * noContact.pageSize) + 1"></span>-<span x-text="Math.min(noContact.page * noContact.pageSize, noContact.total)"></span> of <span x-text="formatNumber(noContact.total)"></span>
                         </div>

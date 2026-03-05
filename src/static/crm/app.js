@@ -86,6 +86,7 @@ function crmApp() {
             loading: true,
             data: null,
         },
+        _savedScrollY: 0,
 
         // Detail emails pagination
         emails: [],
@@ -312,6 +313,7 @@ function crmApp() {
 
         // ==================== DETAIL PANEL ====================
         async openContactDetail(id) {
+            this._savedScrollY = window.scrollY;
             this.detail = { show: true, type: 'contact', id, loading: true, data: null, enrichingTitle: false };
             this.emails = [];
             this.emailsPage = 1;
@@ -345,6 +347,7 @@ function crmApp() {
         },
 
         async openCompanyDetail(id) {
+            this._savedScrollY = window.scrollY;
             this.detail = { show: true, type: 'company', id, loading: true, data: null, recentNews: [], olderNews: [], newsLoading: false, newsTotal: 0, companyTab: 'overview', discoveredContacts: [], discoveredLoading: false, discoveredDomain: '', scanning: false, scanMessage: '', mergeMode: false, mergeSearch: '', mergeResults: [], merging: false };
             this.editing = { field: null, value: '' };
             window.location.hash = 'companies/' + id;
@@ -408,6 +411,7 @@ function crmApp() {
             this.detail.show = false;
             this.editing = { field: null, value: '' };
             window.location.hash = this.currentView;
+            this.$nextTick(() => { window.scrollTo(0, this._savedScrollY); });
         },
 
         // ==================== CONTACT EMAILS ====================
