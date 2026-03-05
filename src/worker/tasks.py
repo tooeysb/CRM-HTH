@@ -48,9 +48,81 @@ def discover_domain_contacts(self, user_id: str) -> dict:
         )
         stats = discoverer.discover_all()
         logger.info("[%s] Domain discovery complete: %s", correlation_id, stats)
+
+        # Chain: auto-promote direct contacts after discovery
+        promote_direct_contacts.delay(user_id)
+        logger.info("[%s] Queued contact promotion task", correlation_id)
+
         return {"status": "completed", "correlation_id": correlation_id, **stats}
     except Exception as e:
         logger.error("[%s] Domain discovery failed: %s", correlation_id, e, exc_info=True)
+        raise
+    finally:
+        db.close()
+
+
+@celery_app.task(bind=True, name="promote_direct_contacts")
+def promote_direct_contacts(self, user_id: str) -> dict:
+    """
+    Post-discovery task: promote discovered contacts with direct email interaction
+    to CRM contacts, link their emails, and enrich titles.
+
+    Chained from discover_domain_contacts after discovery completes.
+    """
+    from src.services.enrichment.contact_promoter import ContactPromoter
+    from src.services.enrichment.email_participant_builder import EmailParticipantBuilder
+    from src.services.enrichment.title_enricher import BatchTitleEnricher
+
+    correlation_id = str(uuid.uuid4())
+    logger.info("[%s] Starting contact promotion for user %s", correlation_id, user_id)
+
+    db = SessionLocal()
+    try:
+        uid = uuid.UUID(user_id)
+
+        # Step 1: Promote direct contacts
+        promoter = ContactPromoter(user_id=uid, db=db)
+        promo_stats = promoter.promote_direct_contacts()
+        logger.info("[%s] Promotion stats: %s", correlation_id, promo_stats)
+
+        if promo_stats["promoted"] == 0:
+            logger.info("[%s] No new contacts to promote", correlation_id)
+            return {
+                "status": "completed",
+                "correlation_id": correlation_id,
+                "promotion": {
+                    "promoted": 0,
+                    "skipped_existing": promo_stats["skipped_existing"],
+                    "total_direct": promo_stats["total_direct"],
+                },
+            }
+
+        # Step 2: Link emails for each promoted contact
+        builder = EmailParticipantBuilder(user_id=uid, db=db)
+        linked = 0
+        for pc in promo_stats["promoted_contacts"]:
+            linked += builder.build_for_contact(pc["id"], pc["email"])
+        logger.info("[%s] Linked %d email participants", correlation_id, linked)
+
+        # Step 3: Batch title enrichment for contacts without titles
+        promoted_ids = [pc["id"] for pc in promo_stats["promoted_contacts"]]
+        enricher = BatchTitleEnricher(user_id=uid, db=db)
+        title_stats = enricher.enrich_titles(contact_ids=promoted_ids)
+        logger.info("[%s] Title enrichment stats: %s", correlation_id, title_stats)
+
+        return {
+            "status": "completed",
+            "correlation_id": correlation_id,
+            "promotion": {
+                "promoted": promo_stats["promoted"],
+                "skipped_existing": promo_stats["skipped_existing"],
+                "total_direct": promo_stats["total_direct"],
+            },
+            "email_linking": {"linked": linked},
+            "title_enrichment": title_stats,
+        }
+    except Exception as e:
+        logger.error("[%s] Contact promotion failed: %s", correlation_id, e, exc_info=True)
         raise
     finally:
         db.close()

@@ -1451,6 +1451,7 @@ def get_discovered_contacts(
                 "email_count": dc.email_count,
                 "last_email": serialize_dt(dc.last_email_at),
                 "first_email": serialize_dt(dc.first_email_at),
+                "is_direct": dc.is_direct,
             }
         )
 

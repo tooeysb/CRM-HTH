@@ -594,14 +594,6 @@
                                             </template>
                                         </button>
                                     </th>
-                                    <th class="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider hidden lg:table-cell">
-                                        <button @click="toggleSort('companies', 'industry')" class="inline-flex items-center hover:text-gray-700">
-                                            Industry
-                                            <template x-if="companies.sortBy === 'industry'">
-                                                <svg class="w-3 h-3 ml-1" fill="currentColor" viewBox="0 0 20 20"><path :d="companies.sortDir === 'asc' ? 'M5 10l5-5 5 5H5z' : 'M5 10l5 5 5-5H5z'"/></svg>
-                                            </template>
-                                        </button>
-                                    </th>
                                     <th class="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider hidden md:table-cell">
                                         <button @click="toggleSort('companies', 'company_type')" class="inline-flex items-center hover:text-gray-700">
                                             Type
@@ -635,14 +627,6 @@
                                         </button>
                                     </th>
                                     <th class="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider hidden xl:table-cell">
-                                        <button @click="toggleSort('companies', 'account_owner')" class="inline-flex items-center hover:text-gray-700">
-                                            Owner
-                                            <template x-if="companies.sortBy === 'account_owner'">
-                                                <svg class="w-3 h-3 ml-1" fill="currentColor" viewBox="0 0 20 20"><path :d="companies.sortDir === 'asc' ? 'M5 10l5-5 5 5H5z' : 'M5 10l5 5 5-5H5z'"/></svg>
-                                            </template>
-                                        </button>
-                                    </th>
-                                    <th class="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider hidden xl:table-cell">
                                         <button @click="toggleSort('companies', 'renewal_date')" class="inline-flex items-center hover:text-gray-700">
                                             Renewal
                                             <template x-if="companies.sortBy === 'renewal_date'">
@@ -667,9 +651,6 @@
                                                 <div class="text-xs text-gray-500 truncate" x-text="c.domain || ''"></div>
                                             </div>
                                         </td>
-                                        <td class="px-5 py-3 hidden lg:table-cell">
-                                            <span class="text-sm text-gray-600" x-text="c.industry || '-'"></span>
-                                        </td>
                                         <td class="px-5 py-3 hidden md:table-cell">
                                             <template x-if="c.company_type">
                                                 <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium"
@@ -689,9 +670,6 @@
                                         </td>
                                         <td class="px-5 py-3 text-right hidden sm:table-cell">
                                             <span class="text-sm tabular-nums text-gray-600" x-text="c.contact_count || 0"></span>
-                                        </td>
-                                        <td class="px-5 py-3 hidden xl:table-cell">
-                                            <span class="text-sm text-gray-600" x-text="c.account_owner || '-'"></span>
                                         </td>
                                         <td class="px-5 py-3 hidden xl:table-cell">
                                             <span class="text-sm" :class="isRenewalSoon(c.renewal_date) ? 'text-red-600 font-medium' : 'text-gray-600'"

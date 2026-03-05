@@ -8,7 +8,7 @@ whose domain matches a CRM company, but who aren't yet CRM contacts.
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -26,9 +26,7 @@ class DiscoveredContact(Base, UUIDMixin, TimestampMixin):
     """
 
     __tablename__ = "discovered_contacts"
-    __table_args__ = (
-        UniqueConstraint("user_id", "email", name="uq_user_discovered_email"),
-    )
+    __table_args__ = (UniqueConstraint("user_id", "email", name="uq_user_discovered_email"),)
 
     user_id: Mapped[UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -62,6 +60,14 @@ class DiscoveredContact(Base, UUIDMixin, TimestampMixin):
 
     first_email_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, comment="Earliest email"
+    )
+
+    is_direct: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        server_default=text("false"),
+        nullable=False,
+        comment="True if person had direct email interaction (sent to or received from user)",
     )
 
     # Relationships

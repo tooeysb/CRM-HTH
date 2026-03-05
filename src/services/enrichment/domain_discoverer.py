@@ -58,6 +58,7 @@ class DomainContactDiscoverer:
         self.user_id = user_id
         self.db = db
         self.account_id = self._resolve_account_id()
+        self.user_email = self._resolve_user_email()
 
     def discover_all(self, batch_size: int = 5000) -> dict:
         """
@@ -84,9 +85,12 @@ class DomainContactDiscoverer:
         # 4. Clear old discovered contacts and insert new ones
         created = self._rebuild_table(people)
 
+        direct_count = sum(1 for p in people.values() if p.get("is_direct"))
         stats = {
             "companies": len(domain_to_company),
             "people_found": len(people),
+            "direct_count": direct_count,
+            "indirect_count": len(people) - direct_count,
             "created": created,
         }
         logger.info("Discovery complete: %s", stats)
@@ -105,6 +109,20 @@ class DomainContactDiscoverer:
                 if d and d not in _GENERIC_DOMAINS:
                     result[d] = cid
         return result
+
+    def _resolve_user_email(self) -> str:
+        """Get the user's email address from the primary Gmail account."""
+        stmt = select(GmailAccount.account_email).where(
+            GmailAccount.user_id == self.user_id,
+            GmailAccount.account_label == self.PRIMARY_ACCOUNT_LABEL,
+        )
+        row = self.db.execute(stmt).first()
+        if row and row[0]:
+            email = row[0].lower().strip()
+            logger.info("User email resolved: %s", email)
+            return email
+        logger.warning("Could not resolve user email, using fallback")
+        return "tooey@procore.com"
 
     def _resolve_account_id(self) -> UUID | None:
         """Resolve the primary Gmail account ID for filtering emails."""
@@ -178,7 +196,10 @@ class DomainContactDiscoverer:
             for row_id, sender_email, sender_name, recipient_emails, email_date in rows:
                 last_id = row_id
 
-                # Check sender
+                sender_lower = sender_email.strip().lower() if sender_email else ""
+                sender_is_user = sender_lower == self.user_email
+
+                # Check sender — they sent TO the user, so always direct
                 if sender_email:
                     self._check_and_add(
                         sender_email.strip(),
@@ -187,9 +208,10 @@ class DomainContactDiscoverer:
                         domain_to_company,
                         existing_contacts,
                         people,
+                        is_direct=True,
                     )
 
-                # Check recipients
+                # Check recipients — direct only if USER sent the email
                 if recipient_emails:
                     for raw_addr in recipient_emails.split(","):
                         raw_addr = raw_addr.strip()
@@ -205,6 +227,7 @@ class DomainContactDiscoverer:
                                 domain_to_company,
                                 existing_contacts,
                                 people,
+                                is_direct=sender_is_user,
                             )
 
             processed += len(rows)
@@ -227,6 +250,7 @@ class DomainContactDiscoverer:
         domain_to_company: dict[str, UUID],
         existing_contacts: set[str],
         people: dict[str, dict],
+        is_direct: bool = False,
     ):
         """Check if an email matches a company domain and add to people dict."""
         email_lower = email.lower().strip()
@@ -260,10 +284,13 @@ class DomainContactDiscoverer:
                 "email_count": 0,
                 "first_email_at": email_date,
                 "last_email_at": email_date,
+                "is_direct": is_direct,
             }
 
         entry = people[email_lower]
         entry["email_count"] += 1
+        # Once direct, always direct (OR logic)
+        entry["is_direct"] = entry["is_direct"] or is_direct
 
         # Update name if we got a better one
         if name and not entry["name"]:
@@ -302,6 +329,7 @@ class DomainContactDiscoverer:
                     "email_count": p["email_count"],
                     "last_email_at": p["last_email_at"],
                     "first_email_at": p["first_email_at"],
+                    "is_direct": p.get("is_direct", False),
                 }
                 for p in chunk
             ]
