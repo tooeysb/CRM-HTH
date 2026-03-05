@@ -147,6 +147,14 @@ class Company(Base, UUIDMixin, TimestampMixin):
         String(500), nullable=True, comment="Company LinkedIn page URL"
     )
 
+    leadership_page_url: Mapped[str | None] = mapped_column(
+        String(2048), nullable=True, comment="URL of company leadership/team page"
+    )
+
+    leadership_scraped_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, comment="When leadership page was last scraped"
+    )
+
     deleted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, comment="Soft delete timestamp"
     )

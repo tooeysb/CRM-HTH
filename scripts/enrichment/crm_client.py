@@ -77,5 +77,24 @@ class CRMClient:
         resp.raise_for_status()
         return resp.json()
 
+    def get_needs_leadership(self) -> list[dict]:
+        """Companies with a domain but no leadership page scraped."""
+        resp = self._client.get("/crm/api/reports/needs-leadership-discovery")
+        resp.raise_for_status()
+        return resp.json()["items"]
+
+    def add_contact_to_company(
+        self, company_id: str, email: str, name: str | None = None, title: str | None = None
+    ) -> dict:
+        """POST /crm/api/companies/{id}/contacts — add a new contact."""
+        body: dict = {"email": email}
+        if name:
+            body["name"] = name
+        if title:
+            body["title"] = title
+        resp = self._client.post(f"/crm/api/companies/{company_id}/contacts", json=body)
+        resp.raise_for_status()
+        return resp.json()
+
     def close(self):
         self._client.close()

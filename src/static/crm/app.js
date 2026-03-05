@@ -77,6 +77,7 @@ function crmApp() {
             needsBrowserEnrich: [],
             needsHumanResearch: [],
             jobChanges: [],
+            needsLeadership: [],
         },
 
         // Admin
@@ -675,13 +676,14 @@ function crmApp() {
         // ==================== REPORTS ====================
         async loadReports() {
             this.reports.loading = true;
-            const [names, noPeople, needsLI, browserEnrich, humanResearch, jobChanges] = await Promise.all([
+            const [names, noPeople, needsLI, browserEnrich, humanResearch, jobChanges, needsLeadership] = await Promise.all([
                 this.apiFetch('reports/challenging-names'),
                 this.apiFetch('reports/companies-without-people'),
                 this.apiFetch('reports/needs-linkedin-url'),
                 this.apiFetch('reports/needs-browser-enrich'),
                 this.apiFetch('reports/needs-human-research'),
                 this.apiFetch('reports/job-changes'),
+                this.apiFetch('reports/needs-leadership-discovery'),
             ]);
             if (names) this.reports.challengingNames = names.items || [];
             if (noPeople) this.reports.companiesWithoutPeople = noPeople.items || [];
@@ -689,6 +691,7 @@ function crmApp() {
             if (browserEnrich) this.reports.needsBrowserEnrich = browserEnrich.items || [];
             if (humanResearch) this.reports.needsHumanResearch = humanResearch.items || [];
             if (jobChanges) this.reports.jobChanges = jobChanges.items || [];
+            if (needsLeadership) this.reports.needsLeadership = needsLeadership.items || [];
             this.reports.loading = false;
         },
 

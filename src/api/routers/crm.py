@@ -161,6 +161,8 @@ class CompanyUpdateRequest(BaseModel):
     industry: str | None = None
     news_search_override: str | None = None
     linkedin_url: str | None = None
+    leadership_page_url: str | None = None
+    leadership_scraped_at: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -267,6 +269,8 @@ def _serialize_company(company: Company, contact_count: int = 0) -> dict:
         "source_data": company.source_data,
         "news_search_override": company.news_search_override,
         "linkedin_url": company.linkedin_url,
+        "leadership_page_url": company.leadership_page_url,
+        "leadership_scraped_at": serialize_dt(company.leadership_scraped_at),
         "created_at": serialize_dt(company.created_at),
         "updated_at": serialize_dt(company.updated_at),
     }
@@ -2085,6 +2089,47 @@ def report_needs_recheck(
             "last_linkedin_check_at": serialize_dt(c.last_linkedin_check_at),
         }
         for c in contacts
+    ]
+
+    return {"items": results, "total": len(results)}
+
+
+# ---------------------------------------------------------------------------
+# GET /reports/needs-leadership-discovery
+# ---------------------------------------------------------------------------
+
+
+@router.get("/reports/needs-leadership-discovery")
+def report_needs_leadership(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_sync_db),
+):
+    """Companies with a domain but no leadership page scraped yet."""
+    uid = user.id
+
+    companies = (
+        db.query(Company)
+        .filter(
+            Company.user_id == uid,
+            Company.deleted_at.is_(None),
+            Company.domain.isnot(None),
+            Company.domain != "",
+            Company.leadership_scraped_at.is_(None),
+        )
+        .order_by(Company.name.asc())
+        .limit(200)
+        .all()
+    )
+
+    results = [
+        {
+            "id": str(c.id),
+            "name": c.name,
+            "domain": c.domain,
+            "leadership_page_url": c.leadership_page_url,
+            "leadership_scraped_at": serialize_dt(c.leadership_scraped_at),
+        }
+        for c in companies
     ]
 
     return {"items": results, "total": len(results)}
