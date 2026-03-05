@@ -1234,10 +1234,21 @@
                                             <td class="px-6 py-3 text-sm text-gray-500 hidden md:table-cell" x-text="item.enrichment_notes || '-'"></td>
                                             <td class="px-6 py-3 text-sm text-gray-500 hidden lg:table-cell" x-text="item.email_count"></td>
                                             <td class="px-6 py-3">
-                                                <button @click="openContactDetail(item.id)"
-                                                    class="text-xs font-medium text-primary-600 hover:text-primary-800">
-                                                    Research &rarr;
-                                                </button>
+                                                <div class="flex items-center gap-3">
+                                                    <button @click="openContactDetail(item.id)"
+                                                        class="text-xs font-medium text-primary-600 hover:text-primary-800">
+                                                        Research &rarr;
+                                                    </button>
+                                                    <button @click="resolveHumanResearch(item.id)"
+                                                        class="text-xs font-medium text-green-600 hover:text-green-800">
+                                                        Resolve
+                                                    </button>
+                                                    <button @click="requeueForEnrichment(item.id)"
+                                                        class="text-xs font-medium text-amber-600 hover:text-amber-800"
+                                                        title="Clear LinkedIn URL and re-queue for automated enrichment">
+                                                        Retry
+                                                    </button>
+                                                </div>
                                             </td>
                                         </tr>
                                     </template>

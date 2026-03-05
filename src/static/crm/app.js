@@ -469,6 +469,26 @@ function crmApp() {
             }
         },
 
+        async resolveHumanResearch(contactId) {
+            const result = await this.apiFetch('contacts/' + contactId, {
+                method: 'PATCH',
+                body: JSON.stringify({ enrichment_status: 'reviewed', enrichment_notes: null }),
+            });
+            if (result) {
+                this.reports.needsHumanResearch = this.reports.needsHumanResearch.filter(c => c.id !== contactId);
+            }
+        },
+
+        async requeueForEnrichment(contactId) {
+            const result = await this.apiFetch('contacts/' + contactId, {
+                method: 'PATCH',
+                body: JSON.stringify({ enrichment_status: null, enrichment_notes: null, linkedin_url: null }),
+            });
+            if (result) {
+                this.reports.needsHumanResearch = this.reports.needsHumanResearch.filter(c => c.id !== contactId);
+            }
+        },
+
         async reactivateContact(id) {
             const result = await this.apiFetch('contacts/' + id, {
                 method: 'PATCH',
