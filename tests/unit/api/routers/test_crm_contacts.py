@@ -90,7 +90,7 @@ class TestListContactsEmailDates:
 # Tests: POST /contacts/{id}/enrich-title (async title enrichment)
 # ---------------------------------------------------------------------------
 class TestEnrichTitle:
-    """POST /crm/api/contacts/{id}/enrich-title should extract title via Haiku."""
+    """POST /crm/api/contacts/{id}/enrich-title — LinkedIn first, Haiku fallback."""
 
     def _setup_enrich_mocks(self, mock_db, contact):
         """Configure mock_db for the enrich-title endpoint."""
@@ -101,57 +101,9 @@ class TestEnrichTitle:
             contact,
         ]
 
-    @patch("src.api.routers.crm._enrich_with_haiku")
-    def test_enriches_title_when_missing(self, mock_haiku, test_client, mock_db):
-        """When contact has no title, Haiku is called and title is persisted."""
-        contact = _make_contact(title=None)
-        company_mock = MagicMock()
-        company_mock.name = "Acme Corp"
-        contact.company = company_mock
-        self._setup_enrich_mocks(mock_db, contact)
-
-        sig_row = MagicMock()
-        sig_row.sender_name = "Kasey Bevans"
-        sig_row.sig_text = "Thanks!\n\nKasey Bevans\nVP of Operations\nAcme Corp"
-        mock_db.execute.return_value.fetchall.return_value = [sig_row]
-
-        mock_haiku.return_value = {
-            "kasey@acme.com": {
-                "name": "Kasey Bevans",
-                "title": "VP of Operations",
-                "linkedin_url": None,
-            }
-        }
-
-        resp = test_client.post(f"/crm/api/contacts/{contact.id}/enrich-title")
-        assert resp.status_code == 200
-        assert resp.json()["title"] == "VP of Operations"
-
-        mock_haiku.assert_called_once()
-        assert contact.title == "VP of Operations"
-        mock_db.commit.assert_called()
-
-    @patch("src.api.routers.crm._enrich_with_haiku")
-    def test_returns_existing_title_without_haiku(self, mock_haiku, test_client, mock_db):
-        """When contact already has a title, return it immediately without Haiku."""
-        contact = _make_contact(title="CEO")
-        company_mock = MagicMock()
-        company_mock.name = "Acme Corp"
-        contact.company = company_mock
-        self._setup_enrich_mocks(mock_db, contact)
-
-        resp = test_client.post(f"/crm/api/contacts/{contact.id}/enrich-title")
-        assert resp.status_code == 200
-        assert resp.json()["title"] == "CEO"
-
-        mock_haiku.assert_not_called()
-
     @patch("src.api.routers.crm._search_linkedin_title")
-    @patch("src.api.routers.crm._enrich_with_haiku")
-    def test_falls_back_to_linkedin_when_no_emails(
-        self, mock_haiku, mock_linkedin, test_client, mock_db
-    ):
-        """When no emails found, falls back to LinkedIn search."""
+    def test_linkedin_finds_title(self, mock_linkedin, test_client, mock_db):
+        """When LinkedIn finds a title, return it without calling Haiku."""
         contact = _make_contact(title=None)
         company_mock = MagicMock()
         company_mock.name = "Acme Corp"
@@ -165,17 +117,31 @@ class TestEnrichTitle:
         assert resp.status_code == 200
         assert resp.json()["title"] == "President"
 
-        mock_haiku.assert_not_called()
         mock_linkedin.assert_called_once_with("Kasey Bevans", "Acme Corp")
         assert contact.title == "President"
         mock_db.commit.assert_called()
 
-    @patch("src.api.routers.crm._search_linkedin_title")
     @patch("src.api.routers.crm._enrich_with_haiku")
-    def test_falls_back_to_linkedin_when_haiku_finds_nothing(
-        self, mock_haiku, mock_linkedin, test_client, mock_db
+    def test_returns_existing_title_without_enrichment(self, mock_haiku, test_client, mock_db):
+        """When contact already has a title, return it immediately."""
+        contact = _make_contact(title="CEO")
+        company_mock = MagicMock()
+        company_mock.name = "Acme Corp"
+        contact.company = company_mock
+        self._setup_enrich_mocks(mock_db, contact)
+
+        resp = test_client.post(f"/crm/api/contacts/{contact.id}/enrich-title")
+        assert resp.status_code == 200
+        assert resp.json()["title"] == "CEO"
+
+        mock_haiku.assert_not_called()
+
+    @patch("src.api.routers.crm._enrich_with_haiku")
+    @patch("src.api.routers.crm._search_linkedin_title")
+    def test_falls_back_to_haiku_when_linkedin_fails(
+        self, mock_linkedin, mock_haiku, test_client, mock_db
     ):
-        """When Haiku finds no title, falls back to LinkedIn search."""
+        """When LinkedIn finds nothing, falls back to Haiku email signature extraction."""
         contact = _make_contact(title=None)
         company_mock = MagicMock()
         company_mock.name = "Acme Corp"
@@ -184,27 +150,31 @@ class TestEnrichTitle:
 
         sig_row = MagicMock()
         sig_row.sender_name = "Kasey Bevans"
-        sig_row.sig_text = "Thanks!"
+        sig_row.sig_text = "Thanks!\n\nKasey Bevans\nVP of Operations\nAcme Corp"
         mock_db.execute.return_value.fetchall.return_value = [sig_row]
 
+        mock_linkedin.return_value = None
         mock_haiku.return_value = {
-            "kasey@acme.com": {"name": "Kasey Bevans", "title": None, "linkedin_url": None}
+            "kasey@acme.com": {
+                "name": "Kasey Bevans",
+                "title": "VP of Operations",
+                "linkedin_url": None,
+            }
         }
-        mock_linkedin.return_value = "Director of Engineering"
 
         resp = test_client.post(f"/crm/api/contacts/{contact.id}/enrich-title")
         assert resp.status_code == 200
-        assert resp.json()["title"] == "Director of Engineering"
+        assert resp.json()["title"] == "VP of Operations"
 
-        mock_haiku.assert_called_once()
         mock_linkedin.assert_called_once()
-        assert contact.title == "Director of Engineering"
+        mock_haiku.assert_called_once()
+        assert contact.title == "VP of Operations"
         mock_db.commit.assert_called()
 
-    @patch("src.api.routers.crm._search_linkedin_title")
     @patch("src.api.routers.crm._enrich_with_haiku")
-    def test_returns_null_when_both_fail(self, mock_haiku, mock_linkedin, test_client, mock_db):
-        """When both Haiku and LinkedIn find nothing, return null."""
+    @patch("src.api.routers.crm._search_linkedin_title")
+    def test_returns_null_when_both_fail(self, mock_linkedin, mock_haiku, test_client, mock_db):
+        """When both LinkedIn and Haiku find nothing, return null."""
         contact = _make_contact(title=None)
         company_mock = MagicMock()
         company_mock.name = "Acme Corp"

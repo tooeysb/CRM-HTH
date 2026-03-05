@@ -646,8 +646,12 @@ def enrich_contact_title(
     company_name = contact.company.name if contact.company else ""
     title = None
 
-    # Step 1: Try email signature enrichment via Haiku
-    if sig_rows:
+    # Step 1: Try LinkedIn search first (fast — ~2-5s)
+    title = _search_linkedin_title(contact.name, company_name)
+
+    # Step 2: Fall back to email signature enrichment via Haiku (slow — ~15-25s)
+    if not title and sig_rows:
+        _logger.info("No LinkedIn title for %s, trying email signatures…", contact.name)
         best = max(sig_rows, key=lambda r: len(r.sig_text or ""))
         signatures = {
             contact.email.lower(): (
@@ -658,11 +662,6 @@ def enrich_contact_title(
         enriched = _enrich_with_haiku(signatures, company_name)
         info = enriched.get(contact.email.lower(), {})
         title = info.get("title")
-
-    # Step 2: Fallback to LinkedIn search if Haiku found nothing
-    if not title:
-        _logger.info("No title from email signatures for %s, trying LinkedIn…", contact.name)
-        title = _search_linkedin_title(contact.name, company_name)
 
     if title:
         contact.title = title
@@ -949,14 +948,30 @@ def _search_linkedin_title(name: str | None, company_name: str) -> str | None:
         return None
 
     clean_name = name.split(" - ")[0].strip()
+    # Strip suffixes like "- HQ", ", Inc.", ", LLC" from company names for cleaner search
     co = company_name.split(" - ")[0].strip() if company_name else ""
-    query = (
-        f'"{clean_name}" "{co}" site:linkedin.com/in'
-        if co
-        else f'"{clean_name}" site:linkedin.com/in'
-    )
-    url = f"https://html.duckduckgo.com/html/?q={quote_plus(query)}"
+    co = re.sub(r",?\s*(Inc\.?|LLC|Ltd\.?|Corp\.?|Co\.?)$", "", co).strip()
 
+    # Try exact-match first, then relaxed (handles Dave vs David, etc.)
+    queries = []
+    if co:
+        queries.append(f'"{clean_name}" "{co}" site:linkedin.com/in')
+        queries.append(f"{clean_name} {co} site:linkedin.com/in")
+    else:
+        queries.append(f'"{clean_name}" site:linkedin.com/in')
+
+    for query in queries:
+        result = _search_linkedin_query(clean_name, query)
+        if result:
+            return result
+
+    _logger.info("LinkedIn search found no title for %s at %s", name, company_name)
+    return None
+
+
+def _search_linkedin_query(name: str, query: str) -> str | None:
+    """Execute a single DuckDuckGo search query and parse LinkedIn titles from results."""
+    url = f"https://html.duckduckgo.com/html/?q={quote_plus(query)}"
     try:
         resp = httpx.get(
             url,
@@ -985,22 +1000,19 @@ def _search_linkedin_title(name: str | None, company_name: str) -> str | None:
             parts = [p.strip() for p in raw_title.split(" - ")]
 
             if len(parts) >= 3:
-                # "Name - Title - Company" → middle parts are the title
                 title = " - ".join(parts[1:-1])
                 if title and title.lower() not in ("linkedin", ""):
-                    _logger.info("LinkedIn fallback found title for %s: %s", name, title)
+                    _logger.info("LinkedIn found title for %s: %s", name, title)
                     return title
             elif len(parts) == 2:
-                # "Name - Title" → second part is the title
                 candidate = parts[1]
                 if candidate and candidate.lower() not in ("linkedin", ""):
-                    _logger.info("LinkedIn fallback found title for %s: %s", name, candidate)
+                    _logger.info("LinkedIn found title for %s: %s", name, candidate)
                     return candidate
 
-        _logger.info("LinkedIn search found no title for %s at %s", name, company_name)
         return None
     except Exception:
-        _logger.warning("LinkedIn title search failed for %s", name, exc_info=True)
+        _logger.warning("LinkedIn query failed for %s", name, exc_info=True)
         return None
 
 
