@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import random
 import signal
 import sys
 from datetime import UTC, datetime
@@ -288,7 +289,12 @@ def main():
     parser = argparse.ArgumentParser(description="LinkedIn contact enrichment")
     parser.add_argument("--setup", action="store_true", help="Interactive LinkedIn login")
     parser.add_argument("--dry-run", action="store_true", help="Preview without API updates")
-    parser.add_argument("--limit", type=int, default=0, help="Max contacts to process (0=all)")
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=random.randint(140, 160),
+        help="Max contacts to process (default: ~150 randomized)",
+    )
     parser.add_argument("--headless", action="store_true", help="Run browser headless")
     parser.add_argument("--no-schedule", action="store_true", help="Skip work schedule (run now)")
     parser.add_argument(
