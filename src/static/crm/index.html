@@ -463,9 +463,15 @@
                                                 <div class="w-8 h-8 rounded-full bg-primary-100 text-primary-600 flex items-center justify-center text-xs font-medium flex-shrink-0"
                                                     x-text="c.name ? c.name.charAt(0).toUpperCase() : '?'"></div>
                                                 <div class="ml-3 min-w-0">
-                                                    <div class="flex items-baseline gap-2 min-w-0">
+                                                    <div class="flex items-center gap-1 min-w-0">
                                                         <span class="text-sm font-medium text-gray-900 truncate" x-text="c.name || '(unknown)'"></span>
-                                                        <span x-show="c.title" class="text-xs text-gray-400 truncate flex-shrink" x-text="c.title"></span>
+                                                        <template x-if="isContactEnriched(c)">
+                                                            <svg class="w-3.5 h-3.5 text-green-500 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20" title="Enriched"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
+                                                        </template>
+                                                        <template x-if="c.is_approved">
+                                                            <svg class="w-3.5 h-3.5 text-blue-500 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20" title="Approved"><path fill-rule="evenodd" d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 001.745.723 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 00-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
+                                                        </template>
+                                                        <span x-show="c.title" class="text-xs text-gray-400 truncate flex-shrink ml-0.5" x-text="c.title"></span>
                                                     </div>
                                                     <div class="text-xs text-gray-500 truncate" x-text="c.email"></div>
                                                 </div>
@@ -648,8 +654,14 @@
                                             <div class="min-w-0">
                                                 <div class="flex items-center">
                                                     <span class="text-sm font-medium text-gray-900 truncate" x-text="c.name"></span>
+                                                    <template x-if="isCompanyEnriched(c)">
+                                                        <svg class="w-3.5 h-3.5 ml-1 text-green-500 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20" title="Enriched"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
+                                                    </template>
+                                                    <template x-if="c.is_approved">
+                                                        <svg class="w-3.5 h-3.5 ml-0.5 text-blue-500 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20" title="Approved"><path fill-rule="evenodd" d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 001.745.723 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 00-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
+                                                    </template>
                                                     <template x-if="c.source_data?.enr?.rank_2024">
-                                                        <span class="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-orange-100 text-orange-700 flex-shrink-0"
+                                                        <span class="ml-1 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-orange-100 text-orange-700 flex-shrink-0"
                                                             x-text="'ENR #' + c.source_data.enr.rank_2024"></span>
                                                     </template>
                                                 </div>
@@ -1727,6 +1739,12 @@
                                         <button @click="toggleVipDetail()" class="ml-2 p-0.5 flex-shrink-0">
                                             <svg class="w-5 h-5" :class="detail.data.contact.is_vip ? 'text-amber-400' : 'text-gray-300 hover:text-gray-400'" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/></svg>
                                         </button>
+                                        <template x-if="isContactEnriched(detail.data.contact)">
+                                            <svg class="ml-1 w-4 h-4 text-green-500 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20" title="Enriched"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
+                                        </template>
+                                        <button @click="toggleApproval('contact', detail.data.contact.id)" class="ml-0.5 p-0.5 flex-shrink-0" title="Toggle Tooey Approved">
+                                            <svg class="w-4 h-4" :class="detail.data.contact.is_approved ? 'text-blue-500' : 'text-gray-300 hover:text-gray-400'" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 001.745.723 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 00-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
+                                        </button>
                                     </div>
                                     <p class="text-sm text-gray-500 mt-0.5" x-text="detail.data.contact.email"></p>
                                     <template x-if="detail.data.contact.company && editing.field !== 'company_name'">
@@ -2120,17 +2138,25 @@
                         <!-- Header -->
                         <div class="px-6 pt-6 pb-4 border-b border-gray-100">
                             <div class="pr-8">
-                                <template x-if="editing.field !== 'company_name_header'">
-                                    <h2 @click="startEditing('company_name_header', detail.data.company.name || '')"
-                                        class="text-xl font-semibold text-gray-900 cursor-pointer hover:bg-gray-50 rounded px-1 -mx-1"
-                                        x-text="detail.data.company.name"></h2>
-                                </template>
-                                <template x-if="editing.field === 'company_name_header'">
-                                    <input type="text" x-model="editing.value"
-                                        @blur="saveCompanyField('name')" @keydown.enter="saveCompanyField('name')" @keydown.escape="cancelEditing()"
-                                        x-ref="editInput"
-                                        class="text-xl font-semibold text-gray-900 border border-primary-300 rounded px-1 -mx-1 py-0 w-full focus:outline-none focus:ring-1 focus:ring-primary-500">
-                                </template>
+                                <div class="flex items-center">
+                                    <template x-if="editing.field !== 'company_name_header'">
+                                        <h2 @click="startEditing('company_name_header', detail.data.company.name || '')"
+                                            class="text-xl font-semibold text-gray-900 cursor-pointer hover:bg-gray-50 rounded px-1 -mx-1"
+                                            x-text="detail.data.company.name"></h2>
+                                    </template>
+                                    <template x-if="editing.field === 'company_name_header'">
+                                        <input type="text" x-model="editing.value"
+                                            @blur="saveCompanyField('name')" @keydown.enter="saveCompanyField('name')" @keydown.escape="cancelEditing()"
+                                            x-ref="editInput"
+                                            class="text-xl font-semibold text-gray-900 border border-primary-300 rounded px-1 -mx-1 py-0 w-full focus:outline-none focus:ring-1 focus:ring-primary-500">
+                                    </template>
+                                    <template x-if="isCompanyEnriched(detail.data.company)">
+                                        <svg class="ml-2 w-4 h-4 text-green-500 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20" title="Enriched"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
+                                    </template>
+                                    <button @click="toggleApproval('company', detail.id)" class="ml-1 p-0.5 flex-shrink-0" title="Toggle Tooey Approved">
+                                        <svg class="w-4 h-4" :class="detail.data.company.is_approved ? 'text-blue-500' : 'text-gray-300 hover:text-gray-400'" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 001.745.723 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 00-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
+                                    </button>
+                                </div>
                                 <template x-if="detail.data.company.domain">
                                     <a :href="'https://' + detail.data.company.domain" target="_blank" rel="noopener"
                                         class="text-sm text-primary-600 hover:text-primary-700" x-text="detail.data.company.domain"></a>

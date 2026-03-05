@@ -161,6 +161,14 @@ class Company(Base, UUIDMixin, TimestampMixin):
         DateTime(timezone=True), nullable=True, comment="When leadership page was last scraped"
     )
 
+    is_approved: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        server_default="false",
+        nullable=False,
+        comment="Manually approved by user as verified/complete",
+    )
+
     deleted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, comment="Soft delete timestamp"
     )

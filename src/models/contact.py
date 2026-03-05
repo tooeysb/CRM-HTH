@@ -144,6 +144,14 @@ class Contact(Base, UUIDMixin, TimestampMixin):
         comment="Inactive contacts have left their company; excluded from enrichment",
     )
 
+    is_approved: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        server_default="false",
+        nullable=False,
+        comment="Manually approved by user as verified/complete",
+    )
+
     linkedin_company_raw: Mapped[str | None] = mapped_column(
         String(500),
         nullable=True,

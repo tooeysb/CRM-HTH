@@ -151,6 +151,7 @@ class ContactUpdateRequest(BaseModel):
     job_change_detected_at: str | None = None
     last_linkedin_check_at: str | None = None
     previous_company_id: str | None = None
+    is_approved: bool | None = None
 
 
 class CompanyUpdateRequest(BaseModel):
@@ -165,6 +166,7 @@ class CompanyUpdateRequest(BaseModel):
     linkedin_name: str | None = None
     leadership_page_url: str | None = None
     leadership_scraped_at: str | None = None
+    is_approved: bool | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -241,6 +243,7 @@ def _serialize_contact(contact: Contact, company_name: str | None = None) -> dic
         "enrichment_status": contact.enrichment_status,
         "enrichment_notes": contact.enrichment_notes,
         "is_active": contact.is_active,
+        "is_approved": contact.is_approved,
         "linkedin_company_raw": contact.linkedin_company_raw,
         "job_change_detected_at": serialize_dt(contact.job_change_detected_at),
         "last_linkedin_check_at": serialize_dt(contact.last_linkedin_check_at),
@@ -273,6 +276,7 @@ def _serialize_company(company: Company, contact_count: int = 0) -> dict:
         "linkedin_url": company.linkedin_url,
         "leadership_page_url": company.leadership_page_url,
         "leadership_scraped_at": serialize_dt(company.leadership_scraped_at),
+        "is_approved": company.is_approved,
         "created_at": serialize_dt(company.created_at),
         "updated_at": serialize_dt(company.updated_at),
     }

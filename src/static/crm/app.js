@@ -651,6 +651,44 @@ function crmApp() {
             this._editingCompanyId = null;
         },
 
+        // ==================== APPROVAL TOGGLE ====================
+        async toggleApproval(type, id) {
+            if (type === 'contact') {
+                const contact = this.detail.data?.contact;
+                if (!contact) return;
+                const newVal = !contact.is_approved;
+                const result = await this.apiFetch('contacts/' + id, {
+                    method: 'PATCH',
+                    body: JSON.stringify({ is_approved: newVal }),
+                });
+                if (result) {
+                    contact.is_approved = newVal;
+                    this.updateContactInList(id, { is_approved: newVal });
+                }
+            } else if (type === 'company') {
+                const company = this.detail.data?.company;
+                if (!company) return;
+                const newVal = !company.is_approved;
+                const result = await this.apiFetch('companies/' + id, {
+                    method: 'PATCH',
+                    body: JSON.stringify({ is_approved: newVal }),
+                });
+                if (result) {
+                    company.is_approved = newVal;
+                    const item = this.companies.items.find(c => c.id === id);
+                    if (item) item.is_approved = newVal;
+                }
+            }
+        },
+
+        isContactEnriched(contact) {
+            return contact.enrichment_status === 'enriched' && contact.title && contact.linkedin_url;
+        },
+
+        isCompanyEnriched(company) {
+            return !!company.company_type;
+        },
+
         // ==================== VIP TOGGLE ====================
         async toggleVip(contact) {
             const newVal = !contact.is_vip;
