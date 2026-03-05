@@ -324,31 +324,25 @@ def main():
     try:
         browser.start()
 
-        # Fetch work queues from API
-        queue_browser = crm.get_needs_browser_enrich()
-        queue_url = crm.get_needs_linkedin_url()
-        logger.info(
-            "Work queues: %d need browser enrich, %d need LinkedIn URL",
-            len(queue_browser),
-            len(queue_url),
-        )
+        processed_count = 0
 
-        # Prioritize contacts that already have LinkedIn URLs (faster)
-        all_contacts = queue_browser + queue_url
-
-        # Filter out already-processed contacts
-        contacts = [c for c in all_contacts if not state.is_processed(c.id)]
+        # Phase 1: Re-check enriched contacts for job changes (HIGHEST PRIORITY)
+        # Detect people who left their company — most actionable intelligence
+        queue_recheck = crm.get_needs_recheck()
+        recheck_contacts = [c for c in queue_recheck if not state.is_processed(c.id)]
         logger.info(
-            "%d contacts to process (%d already done today)",
-            len(contacts),
-            len(all_contacts) - len(contacts),
+            "Re-check queue: %d contacts due (%d already done today)",
+            len(recheck_contacts),
+            len(queue_recheck) - len(recheck_contacts),
         )
 
         if args.limit:
-            contacts = contacts[: args.limit]
+            recheck_contacts = recheck_contacts[: args.limit]
 
-        for contact in contacts:
-            # Check work schedule
+        recheck_matches = 0
+        recheck_changes = 0
+
+        for contact in recheck_contacts:
             if not args.no_schedule and not schedule.wait_for_work_hours():
                 logger.info("Work day ended — stopping")
                 break
@@ -357,54 +351,58 @@ def main():
                 logger.info("Shutdown requested — stopping gracefully")
                 break
 
-            # Check for breaks
             if not args.no_schedule and schedule.should_take_break():
                 schedule.take_break()
 
-            # Process this contact
             try:
-                success = enrich_contact(contact, browser, crm, dry_run=args.dry_run)
-                if success:
-                    state.mark_processed(contact.id)
-                else:
-                    state.mark_skipped(contact.id)
+                result = recheck_contact(contact, browser, crm, dry_run=args.dry_run)
+                state.mark_processed(contact.id)
+                if result == "match":
+                    recheck_matches += 1
+                elif result == "changed":
+                    recheck_changes += 1
             except Exception as e:
-                logger.error("Error processing contact %s: %s", contact.id, e)
-                state.mark_error()
+                logger.error("Error re-checking %s: %s", contact.id, e)
                 state.mark_skipped(contact.id)
 
-            # Save state after each contact
             state.save()
+            processed_count += 1
 
-            # Wait between profiles
             if not args.no_schedule:
                 delay_between_profiles()
 
         logger.info(
-            "Enrichment phase complete: %d enriched, %d skipped, %d errors",
-            state.total_enriched,
-            state.total_skipped,
-            state.total_errors,
+            "Re-check complete: %d still at company, %d job changes detected",
+            recheck_matches,
+            recheck_changes,
         )
 
-        # Phase 2: Re-check enriched contacts for job changes
+        # Phase 2: Enrich contacts that need LinkedIn data
         if not shutdown_requested:
-            queue_recheck = crm.get_needs_recheck()
-            recheck_contacts = [c for c in queue_recheck if not state.is_processed(c.id)]
+            queue_browser = crm.get_needs_browser_enrich()
+            queue_url = crm.get_needs_linkedin_url()
             logger.info(
-                "Re-check queue: %d contacts due (%d already done today)",
-                len(recheck_contacts),
-                len(queue_recheck) - len(recheck_contacts),
+                "Enrichment queues: %d need browser enrich, %d need LinkedIn URL",
+                len(queue_browser),
+                len(queue_url),
+            )
+
+            # Prioritize contacts that already have LinkedIn URLs (faster)
+            all_contacts = queue_browser + queue_url
+
+            # Filter out already-processed contacts
+            contacts = [c for c in all_contacts if not state.is_processed(c.id)]
+            logger.info(
+                "%d contacts to enrich (%d already done today)",
+                len(contacts),
+                len(all_contacts) - len(contacts),
             )
 
             if args.limit:
-                remaining = max(0, args.limit - len(contacts))
-                recheck_contacts = recheck_contacts[:remaining]
+                remaining = max(0, args.limit - processed_count)
+                contacts = contacts[:remaining]
 
-            recheck_matches = 0
-            recheck_changes = 0
-
-            for contact in recheck_contacts:
+            for contact in contacts:
                 if not args.no_schedule and not schedule.wait_for_work_hours():
                     logger.info("Work day ended — stopping")
                     break
@@ -417,14 +415,14 @@ def main():
                     schedule.take_break()
 
                 try:
-                    result = recheck_contact(contact, browser, crm, dry_run=args.dry_run)
-                    state.mark_processed(contact.id)
-                    if result == "match":
-                        recheck_matches += 1
-                    elif result == "changed":
-                        recheck_changes += 1
+                    success = enrich_contact(contact, browser, crm, dry_run=args.dry_run)
+                    if success:
+                        state.mark_processed(contact.id)
+                    else:
+                        state.mark_skipped(contact.id)
                 except Exception as e:
-                    logger.error("Error re-checking %s: %s", contact.id, e)
+                    logger.error("Error processing contact %s: %s", contact.id, e)
+                    state.mark_error()
                     state.mark_skipped(contact.id)
 
                 state.save()
@@ -433,9 +431,10 @@ def main():
                     delay_between_profiles()
 
             logger.info(
-                "Re-check complete: %d still at company, %d job changes detected",
-                recheck_matches,
-                recheck_changes,
+                "Enrichment complete: %d enriched, %d skipped, %d errors",
+                state.total_enriched,
+                state.total_skipped,
+                state.total_errors,
             )
 
     finally:
