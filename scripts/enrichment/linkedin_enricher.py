@@ -21,6 +21,7 @@ import argparse
 import os
 import signal
 import sys
+from datetime import datetime
 from pathlib import Path
 
 # Ensure project root is on PYTHONPATH
@@ -144,6 +145,104 @@ def enrich_contact(
         _update_company(crm, contact.company_name, profile)
 
     return True
+
+
+def _normalize_company_name(name: str) -> str:
+    """Normalize company name for comparison (strip suffixes, lowercase)."""
+    if not name:
+        return ""
+    name = name.lower().strip()
+    # Strip common corporate suffixes
+    for suffix in (
+        ", inc.",
+        ", inc",
+        " inc.",
+        " inc",
+        ", llc",
+        " llc",
+        ", ltd.",
+        ", ltd",
+        " ltd.",
+        " ltd",
+        ", corp.",
+        ", corp",
+        " corp.",
+        " corp",
+        " corporation",
+        " incorporated",
+        " company",
+        ", l.p.",
+        " l.p.",
+    ):
+        if name.endswith(suffix):
+            name = name[: -len(suffix)].strip()
+    return name
+
+
+def recheck_contact(
+    contact: ContactToEnrich,
+    browser: LinkedInBrowser,
+    crm: CRMClient,
+    dry_run: bool = False,
+) -> str:
+    """
+    Re-check a contact's LinkedIn profile for job change.
+
+    Returns: "match", "changed", or "error".
+    """
+    logger.info(
+        "Re-checking: %s (%s) — CRM company: %s",
+        contact.name,
+        contact.email,
+        contact.company_name,
+    )
+
+    if not contact.linkedin_url:
+        return "error"
+
+    profile = browser.extract_profile(contact.linkedin_url)
+    now = datetime.utcnow().isoformat()
+
+    # Compare company names
+    crm_company = _normalize_company_name(contact.company_name or "")
+    linkedin_company = _normalize_company_name(profile.company_name or "")
+
+    if not linkedin_company:
+        # LinkedIn shows no company — may have retired or profile incomplete
+        logger.info("No company on LinkedIn for %s — flagging as changed", contact.name)
+        if not dry_run:
+            crm.update_contact(
+                contact.id,
+                is_active=False,
+                linkedin_company_raw=profile.company_name or "(no company listed)",
+                job_change_detected_at=now,
+                last_linkedin_check_at=now,
+            )
+        return "changed"
+
+    if crm_company and crm_company in linkedin_company or linkedin_company in crm_company:
+        # Names overlap — still at same company
+        logger.info("Company match for %s: '%s'", contact.name, profile.company_name)
+        if not dry_run:
+            crm.update_contact(contact.id, last_linkedin_check_at=now)
+        return "match"
+
+    # Mismatch — job change detected
+    logger.info(
+        "JOB CHANGE: %s moved from '%s' to '%s'",
+        contact.name,
+        contact.company_name,
+        profile.company_name,
+    )
+    if not dry_run:
+        crm.update_contact(
+            contact.id,
+            is_active=False,
+            linkedin_company_raw=profile.company_name,
+            job_change_detected_at=now,
+            last_linkedin_check_at=now,
+        )
+    return "changed"
 
 
 def _update_company(crm: CRMClient, search_name: str, profile) -> None:
@@ -282,11 +381,62 @@ def main():
                 delay_between_profiles()
 
         logger.info(
-            "Session complete: %d enriched, %d skipped, %d errors",
+            "Enrichment phase complete: %d enriched, %d skipped, %d errors",
             state.total_enriched,
             state.total_skipped,
             state.total_errors,
         )
+
+        # Phase 2: Re-check enriched contacts for job changes
+        if not shutdown_requested:
+            queue_recheck = crm.get_needs_recheck()
+            recheck_contacts = [c for c in queue_recheck if not state.is_processed(c.id)]
+            logger.info(
+                "Re-check queue: %d contacts due (%d already done today)",
+                len(recheck_contacts),
+                len(queue_recheck) - len(recheck_contacts),
+            )
+
+            if args.limit:
+                remaining = max(0, args.limit - len(contacts))
+                recheck_contacts = recheck_contacts[:remaining]
+
+            recheck_matches = 0
+            recheck_changes = 0
+
+            for contact in recheck_contacts:
+                if not args.no_schedule and not schedule.wait_for_work_hours():
+                    logger.info("Work day ended — stopping")
+                    break
+
+                if shutdown_requested:
+                    logger.info("Shutdown requested — stopping gracefully")
+                    break
+
+                if not args.no_schedule and schedule.should_take_break():
+                    schedule.take_break()
+
+                try:
+                    result = recheck_contact(contact, browser, crm, dry_run=args.dry_run)
+                    state.mark_processed(contact.id)
+                    if result == "match":
+                        recheck_matches += 1
+                    elif result == "changed":
+                        recheck_changes += 1
+                except Exception as e:
+                    logger.error("Error re-checking %s: %s", contact.id, e)
+                    state.mark_skipped(contact.id)
+
+                state.save()
+
+                if not args.no_schedule:
+                    delay_between_profiles()
+
+            logger.info(
+                "Re-check complete: %d still at company, %d job changes detected",
+                recheck_matches,
+                recheck_changes,
+            )
 
     finally:
         browser.stop()

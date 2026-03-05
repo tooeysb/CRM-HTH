@@ -135,10 +135,50 @@ class Contact(Base, UUIDMixin, TimestampMixin):
         DateTime(timezone=True), nullable=True, comment="Soft delete timestamp"
     )
 
+    # Job Change Tracking
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        server_default="true",
+        nullable=False,
+        comment="Inactive contacts have left their company; excluded from enrichment",
+    )
+
+    linkedin_company_raw: Mapped[str | None] = mapped_column(
+        String(500),
+        nullable=True,
+        comment="Company name as seen on LinkedIn during last check",
+    )
+
+    job_change_detected_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="When a company mismatch was detected on LinkedIn",
+    )
+
+    last_linkedin_check_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="When LinkedIn profile was last visited for re-check",
+    )
+
+    previous_company_id: Mapped[UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("companies.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="Previous company before reassignment after job change",
+    )
+
     # Relationships
     user: Mapped["User"] = relationship("User", back_populates="contacts")
 
-    company: Mapped["Company | None"] = relationship("Company", back_populates="contacts")
+    company: Mapped["Company | None"] = relationship(
+        "Company", back_populates="contacts", foreign_keys=[company_id]
+    )
+
+    previous_company: Mapped["Company | None"] = relationship(
+        "Company", foreign_keys=[previous_company_id]
+    )
 
     enrichments: Mapped[list["ContactEnrichment"]] = relationship(
         "ContactEnrichment", back_populates="contact"

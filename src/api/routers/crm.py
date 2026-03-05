@@ -145,6 +145,11 @@ class ContactUpdateRequest(BaseModel):
     linkedin_url: str | None = None
     enrichment_status: str | None = None
     enrichment_notes: str | None = None
+    is_active: bool | None = None
+    linkedin_company_raw: str | None = None
+    job_change_detected_at: str | None = None
+    last_linkedin_check_at: str | None = None
+    previous_company_id: str | None = None
 
 
 class CompanyUpdateRequest(BaseModel):
@@ -231,6 +236,10 @@ def _serialize_contact(contact: Contact, company_name: str | None = None) -> dic
         "linkedin_url": contact.linkedin_url,
         "enrichment_status": contact.enrichment_status,
         "enrichment_notes": contact.enrichment_notes,
+        "is_active": contact.is_active,
+        "linkedin_company_raw": contact.linkedin_company_raw,
+        "job_change_detected_at": serialize_dt(contact.job_change_detected_at),
+        "last_linkedin_check_at": serialize_dt(contact.last_linkedin_check_at),
         "created_at": serialize_dt(contact.created_at),
         "updated_at": serialize_dt(contact.updated_at),
     }
@@ -275,7 +284,7 @@ def crm_dashboard(user: User = Depends(get_current_user), db: Session = Depends(
 
     total_contacts = (
         db.query(func.count(Contact.id))
-        .filter(Contact.user_id == uid, Contact.deleted_at.is_(None))
+        .filter(Contact.user_id == uid, Contact.deleted_at.is_(None), Contact.is_active.is_(True))
         .scalar()
         or 0
     )
@@ -378,7 +387,7 @@ def list_contacts(
         db.query(Contact)
         .options(selectinload(Contact.company))
         .outerjoin(Company, Contact.company_id == Company.id)
-        .filter(Contact.user_id == uid, Contact.deleted_at.is_(None))
+        .filter(Contact.user_id == uid, Contact.deleted_at.is_(None), Contact.is_active.is_(True))
     )
 
     # Filters
@@ -847,6 +856,7 @@ def list_companies(
             Contact.user_id == uid,
             Contact.company_id.isnot(None),
             Contact.deleted_at.is_(None),
+            Contact.is_active.is_(True),
         )
         .group_by(Contact.company_id)
         .subquery()
@@ -940,8 +950,8 @@ def get_company(
     if not company:
         raise HTTPException(status_code=404, detail="Company not found")
 
-    # Contacts at this company
-    contacts = (
+    # Contacts at this company (active + inactive)
+    all_contacts = (
         db.query(Contact)
         .filter(
             Contact.user_id == uid,
@@ -952,10 +962,21 @@ def get_company(
         .all()
     )
 
+    contacts = [c for c in all_contacts if c.is_active]
+    inactive_contacts = [c for c in all_contacts if not c.is_active]
+
     contacts_data = [_serialize_contact(c, company.name) for c in contacts]
+    inactive_contacts_data = [
+        {
+            **_serialize_contact(c, company.name),
+            "linkedin_company_raw": c.linkedin_company_raw,
+            "job_change_detected_at": serialize_dt(c.job_change_detected_at),
+        }
+        for c in inactive_contacts
+    ]
 
     # Email summary across all contacts at company
-    contact_ids = [c.id for c in contacts]
+    contact_ids = [c.id for c in all_contacts]
     if contact_ids:
         total_emails = (
             db.query(func.count(func.distinct(EmailParticipant.email_id)))
@@ -980,7 +1001,7 @@ def get_company(
 
     email_summary = {
         "total_emails": total_emails,
-        "unique_contacts": len(contacts),
+        "unique_contacts": len(all_contacts),
         "first_email_date": first_email,
         "last_email_date": last_email,
     }
@@ -990,6 +1011,7 @@ def get_company(
     return {
         "company": company_data,
         "contacts": contacts_data,
+        "inactive_contacts": inactive_contacts_data,
         "email_summary": email_summary,
     }
 
@@ -1870,6 +1892,8 @@ def report_needs_linkedin_url(
         .options(selectinload(Contact.company))
         .filter(
             Contact.user_id == uid,
+            Contact.deleted_at.is_(None),
+            Contact.is_active.is_(True),
             Contact.title.is_(None),
             Contact.linkedin_url.is_(None),
         )
@@ -1910,6 +1934,8 @@ def report_needs_browser_enrich(
         .options(selectinload(Contact.company))
         .filter(
             Contact.user_id == uid,
+            Contact.deleted_at.is_(None),
+            Contact.is_active.is_(True),
             Contact.title.is_(None),
             Contact.linkedin_url.isnot(None),
         )
@@ -1951,6 +1977,8 @@ def report_needs_human_research(
         .options(selectinload(Contact.company))
         .filter(
             Contact.user_id == uid,
+            Contact.deleted_at.is_(None),
+            Contact.is_active.is_(True),
             Contact.enrichment_status == "needs_review",
         )
         .order_by(Contact.email_count.desc())
@@ -1967,6 +1995,94 @@ def report_needs_human_research(
             "linkedin_url": c.linkedin_url,
             "enrichment_notes": c.enrichment_notes,
             "email_count": c.email_count,
+        }
+        for c in contacts
+    ]
+
+    return {"items": results, "total": len(results)}
+
+
+# ---------------------------------------------------------------------------
+# GET /reports/job-changes
+# ---------------------------------------------------------------------------
+
+
+@router.get("/reports/job-changes")
+def report_job_changes(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_sync_db),
+):
+    """Contacts where a LinkedIn job change was detected."""
+    uid = user.id
+
+    contacts = (
+        db.query(Contact)
+        .options(selectinload(Contact.company))
+        .filter(
+            Contact.user_id == uid,
+            Contact.deleted_at.is_(None),
+            Contact.job_change_detected_at.isnot(None),
+        )
+        .order_by(Contact.job_change_detected_at.desc())
+        .limit(200)
+        .all()
+    )
+
+    results = [
+        {
+            "id": str(c.id),
+            "name": c.name,
+            "email": c.email,
+            "company_name": c.company.name if c.company else None,
+            "linkedin_company_raw": c.linkedin_company_raw,
+            "linkedin_url": c.linkedin_url,
+            "job_change_detected_at": serialize_dt(c.job_change_detected_at),
+            "email_count": c.email_count,
+            "is_active": c.is_active,
+        }
+        for c in contacts
+    ]
+
+    return {"items": results, "total": len(results)}
+
+
+# ---------------------------------------------------------------------------
+# GET /reports/needs-linkedin-recheck
+# ---------------------------------------------------------------------------
+
+
+@router.get("/reports/needs-linkedin-recheck")
+def report_needs_recheck(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_sync_db),
+):
+    """Enriched contacts due for a LinkedIn re-check, oldest first."""
+    uid = user.id
+
+    contacts = (
+        db.query(Contact)
+        .options(selectinload(Contact.company))
+        .filter(
+            Contact.user_id == uid,
+            Contact.deleted_at.is_(None),
+            Contact.is_active.is_(True),
+            Contact.enrichment_status == "enriched",
+            Contact.linkedin_url.isnot(None),
+        )
+        .order_by(Contact.last_linkedin_check_at.asc().nullsfirst())
+        .limit(200)
+        .all()
+    )
+
+    results = [
+        {
+            "id": str(c.id),
+            "name": c.name,
+            "email": c.email,
+            "company_name": c.company.name if c.company else None,
+            "linkedin_url": c.linkedin_url,
+            "email_count": c.email_count,
+            "last_linkedin_check_at": serialize_dt(c.last_linkedin_check_at),
         }
         for c in contacts
     ]

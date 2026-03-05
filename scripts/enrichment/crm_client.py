@@ -53,6 +53,12 @@ class CRMClient:
             items.append(ContactToEnrich(**item))
         return items
 
+    def get_needs_recheck(self) -> list[ContactToEnrich]:
+        """Enriched contacts due for LinkedIn re-check (oldest first)."""
+        resp = self._client.get("/crm/api/reports/needs-linkedin-recheck")
+        resp.raise_for_status()
+        return [ContactToEnrich(**item) for item in resp.json()["items"]]
+
     def update_contact(self, contact_id: str, **fields) -> dict:
         """PATCH /crm/api/contacts/{id} with partial update."""
         resp = self._client.patch(f"/crm/api/contacts/{contact_id}", json=fields)

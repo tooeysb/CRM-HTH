@@ -154,7 +154,9 @@ class Company(Base, UUIDMixin, TimestampMixin):
     # Relationships
     user: Mapped["User"] = relationship("User", back_populates="companies")
 
-    contacts: Mapped[list["Contact"]] = relationship("Contact", back_populates="company")
+    contacts: Mapped[list["Contact"]] = relationship(
+        "Contact", back_populates="company", foreign_keys="[Contact.company_id]"
+    )
 
     news_items: Mapped[list["CompanyNewsItem"]] = relationship(
         "CompanyNewsItem", back_populates="company", cascade="all, delete-orphan"

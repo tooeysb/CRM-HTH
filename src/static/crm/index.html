@@ -963,6 +963,13 @@
                             <span class="ml-1.5 text-xs font-normal" :class="reports.selected === 'humanResearch' ? 'text-primary-500' : 'text-gray-400'"
                                 x-text="'(' + (reports.needsHumanResearch || []).length + ')'"></span>
                         </button>
+                        <button @click="reports.selected = 'jobChanges'"
+                            :class="reports.selected === 'jobChanges' ? 'border-primary-500 text-primary-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
+                            class="whitespace-nowrap pb-3 px-1 border-b-2 font-medium text-sm transition-colors">
+                            Job Changes
+                            <span class="ml-1.5 text-xs font-normal" :class="reports.selected === 'jobChanges' ? 'text-primary-500' : 'text-gray-400'"
+                                x-text="'(' + (reports.jobChanges || []).length + ')'"></span>
+                        </button>
                     </nav>
                 </div>
 
@@ -1226,6 +1233,63 @@
                     </template>
                 </div>
 
+                <!-- ===== Report: Job Changes ===== -->
+                <div x-show="!reports.loading && reports.selected === 'jobChanges'">
+                    <p class="text-sm text-gray-500 mb-4">Contacts detected as having left the company we had them linked to. High-value contacts may have moved to a new company — reach out to bring Procore with them.</p>
+
+                    <template x-if="(reports.jobChanges || []).length === 0">
+                        <div class="bg-white rounded-xl border border-gray-200 shadow-sm px-6 py-12 text-center">
+                            <svg class="mx-auto h-10 w-10 text-green-400" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                            <p class="mt-2 text-sm font-medium text-gray-900">No job changes detected.</p>
+                        </div>
+                    </template>
+
+                    <template x-if="(reports.jobChanges || []).length > 0">
+                        <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                            <table class="min-w-full divide-y divide-gray-200">
+                                <thead class="bg-gray-50">
+                                    <tr>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hidden sm:table-cell">Previous Company</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hidden md:table-cell">LinkedIn Shows</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hidden lg:table-cell">Detected</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="bg-white divide-y divide-gray-200">
+                                    <template x-for="item in reports.jobChanges" :key="item.id">
+                                        <tr class="hover:bg-gray-50">
+                                            <td class="px-6 py-3">
+                                                <button @click="openContactDetail(item.id)" class="text-sm font-medium text-primary-600 hover:text-primary-800 hover:underline"
+                                                    x-text="item.name || item.email"></button>
+                                            </td>
+                                            <td class="px-6 py-3 text-sm text-gray-500 hidden sm:table-cell" x-text="item.company_name || '-'"></td>
+                                            <td class="px-6 py-3 text-sm text-gray-500 hidden md:table-cell" x-text="item.linkedin_company_raw || '-'"></td>
+                                            <td class="px-6 py-3 text-sm text-gray-500 hidden lg:table-cell" x-text="item.job_change_detected_at ? formatDate(item.job_change_detected_at) : '-'"></td>
+                                            <td class="px-6 py-3">
+                                                <div class="flex items-center gap-3">
+                                                    <template x-if="item.linkedin_url">
+                                                        <a :href="item.linkedin_url" target="_blank" rel="noopener"
+                                                            class="text-xs font-medium text-blue-600 hover:text-blue-800">
+                                                            LinkedIn &nearr;
+                                                        </a>
+                                                    </template>
+                                                    <button @click="reactivateContact(item.id)"
+                                                        class="text-xs font-medium text-green-600 hover:text-green-800">
+                                                        Reactivate
+                                                    </button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    </template>
+                                </tbody>
+                            </table>
+                        </div>
+                    </template>
+                </div>
+
                 </div><!-- /Admin > Reports -->
 
                 <!-- ===== Admin > No-Contact ===== -->
@@ -1395,6 +1459,18 @@
                                 <div>
                                     <h3 class="text-sm font-semibold text-gray-900">LinkedIn Job Change Detection</h3>
                                     <p class="mt-1 text-sm text-gray-600">Crawl LinkedIn to detect when contacts have left the company we have them linked to. Surface a list of contacts who have changed jobs so the user can re-engage them at their new company.</p>
+                                </div>
+                                <span class="ml-4 flex-shrink-0 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                                    In Progress
+                                </span>
+                            </div>
+                        </div>
+
+                        <div class="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
+                            <div class="flex items-start justify-between">
+                                <div>
+                                    <h3 class="text-sm font-semibold text-gray-900">Company Leadership Discovery</h3>
+                                    <p class="mt-1 text-sm text-gray-600">Scrape company websites for leadership pages (e.g. "HITT Contracting Leadership", "PCL Construction Leadership"), discover executive contacts, find them on LinkedIn, and auto-add them to the company with full profile tracking.</p>
                                 </div>
                                 <span class="ml-4 flex-shrink-0 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
                                     Planned
@@ -2154,6 +2230,37 @@
                                             <p class="text-sm text-gray-500 py-4 text-center">No people</p>
                                         </template>
                                     </div>
+
+                                    <!-- Inactive Contacts (collapsed) -->
+                                    <template x-if="(detail.data.inactive_contacts || []).length > 0">
+                                        <div class="mt-4 border-t border-gray-100 pt-3">
+                                            <button @click="detail.showInactive = !detail.showInactive"
+                                                class="flex items-center gap-1.5 text-xs font-medium text-gray-400 hover:text-gray-600 transition-colors">
+                                                <svg class="w-3.5 h-3.5 transition-transform" :class="detail.showInactive ? 'rotate-90' : ''"
+                                                    fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+                                                </svg>
+                                                Inactive (<span x-text="detail.data.inactive_contacts.length"></span>)
+                                            </button>
+                                            <div x-show="detail.showInactive" x-collapse class="mt-2 space-y-1">
+                                                <template x-for="c in detail.data.inactive_contacts" :key="c.id">
+                                                    <div class="flex items-center py-2 px-3 rounded-lg opacity-60">
+                                                        <div class="w-7 h-7 rounded-full bg-gray-100 text-gray-400 flex items-center justify-center text-xs font-medium flex-shrink-0"
+                                                            x-text="c.name ? c.name.charAt(0).toUpperCase() : '?'"></div>
+                                                        <div class="ml-3 min-w-0 flex-1">
+                                                            <span class="text-sm text-gray-500 truncate block" x-text="c.name || c.email"></span>
+                                                            <span class="text-xs text-gray-400 truncate block"
+                                                                x-text="c.linkedin_company_raw ? 'Now at ' + c.linkedin_company_raw : 'Left company'"></span>
+                                                        </div>
+                                                        <button @click="reactivateContact(c.id)"
+                                                            class="ml-2 text-xs text-green-600 hover:text-green-800 font-medium flex-shrink-0">
+                                                            Reactivate
+                                                        </button>
+                                                    </div>
+                                                </template>
+                                            </div>
+                                        </div>
+                                    </template>
                                 </div>
                             </div>
                         </template>

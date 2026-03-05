@@ -76,6 +76,7 @@ function crmApp() {
             needsLinkedIn: [],
             needsBrowserEnrich: [],
             needsHumanResearch: [],
+            jobChanges: [],
         },
 
         // Admin
@@ -358,7 +359,7 @@ function crmApp() {
 
         async openCompanyDetail(id) {
             this._savedScrollY = window.scrollY;
-            this.detail = { show: true, type: 'company', id, loading: true, data: null, recentNews: [], olderNews: [], newsLoading: false, newsTotal: 0, companyTab: 'overview', discoveredContacts: [], discoveredLoading: false, discoveredDomain: '', scanning: false, scanMessage: '', mergeMode: false, mergeSearch: '', mergeResults: [], merging: false };
+            this.detail = { show: true, type: 'company', id, loading: true, data: null, recentNews: [], olderNews: [], newsLoading: false, newsTotal: 0, companyTab: 'overview', discoveredContacts: [], discoveredLoading: false, discoveredDomain: '', scanning: false, scanMessage: '', mergeMode: false, mergeSearch: '', mergeResults: [], merging: false, showInactive: false };
             this.editing = { field: null, value: '' };
             window.location.hash = 'companies/' + id;
 
@@ -442,6 +443,17 @@ function crmApp() {
             if (result) {
                 this.closeDetail();
                 this.loadContacts();
+            }
+        },
+
+        async reactivateContact(id) {
+            const result = await this.apiFetch('contacts/' + id, {
+                method: 'PATCH',
+                body: JSON.stringify({ is_active: true, job_change_detected_at: null, linkedin_company_raw: null }),
+            });
+            if (result && this.detail.show) {
+                // Reload company detail to refresh active/inactive lists
+                this.openCompanyDetail(this.detail.id);
             }
         },
 
@@ -663,18 +675,20 @@ function crmApp() {
         // ==================== REPORTS ====================
         async loadReports() {
             this.reports.loading = true;
-            const [names, noPeople, needsLI, browserEnrich, humanResearch] = await Promise.all([
+            const [names, noPeople, needsLI, browserEnrich, humanResearch, jobChanges] = await Promise.all([
                 this.apiFetch('reports/challenging-names'),
                 this.apiFetch('reports/companies-without-people'),
                 this.apiFetch('reports/needs-linkedin-url'),
                 this.apiFetch('reports/needs-browser-enrich'),
                 this.apiFetch('reports/needs-human-research'),
+                this.apiFetch('reports/job-changes'),
             ]);
             if (names) this.reports.challengingNames = names.items || [];
             if (noPeople) this.reports.companiesWithoutPeople = noPeople.items || [];
             if (needsLI) this.reports.needsLinkedIn = needsLI.items || [];
             if (browserEnrich) this.reports.needsBrowserEnrich = browserEnrich.items || [];
             if (humanResearch) this.reports.needsHumanResearch = humanResearch.items || [];
+            if (jobChanges) this.reports.jobChanges = jobChanges.items || [];
             this.reports.loading = false;
         },
 
