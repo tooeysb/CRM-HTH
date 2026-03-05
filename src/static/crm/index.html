@@ -2015,10 +2015,12 @@
                                     </button>
                                 </div>
                                 <template x-if="editing.field !== 'company_domain'">
-                                    <div class="flex items-center gap-1">
+                                    <div class="flex items-center gap-1 flex-wrap">
                                         <template x-if="detail.data.company.domain">
-                                            <a :href="'https://' + detail.data.company.domain" target="_blank" rel="noopener"
-                                                class="text-sm text-primary-600 hover:text-primary-700" x-text="detail.data.company.domain"></a>
+                                            <template x-for="d in detail.data.company.domain.split(',').map(s => s.trim()).filter(Boolean)" :key="d">
+                                                <a :href="'https://' + d" target="_blank" rel="noopener"
+                                                    class="text-sm text-primary-600 hover:text-primary-700" x-text="d"></a>
+                                            </template>
                                         </template>
                                         <button @click="startEditing('company_domain', detail.data.company.domain || '')"
                                             class="text-xs text-gray-400 hover:text-gray-600 cursor-pointer"
@@ -2028,8 +2030,8 @@
                                 <template x-if="editing.field === 'company_domain'">
                                     <input type="text" x-model="editing.value"
                                         @blur="saveCompanyField('domain')" @keydown.enter="saveCompanyField('domain')" @keydown.escape="cancelEditing()"
-                                        x-ref="editInput" placeholder="example.com"
-                                        class="text-sm border border-primary-300 rounded px-2 py-0.5 w-64 focus:outline-none focus:ring-1 focus:ring-primary-500">
+                                        x-ref="editInput" placeholder="example.com, example2.com"
+                                        class="text-sm border border-primary-300 rounded px-2 py-0.5 w-72 focus:outline-none focus:ring-1 focus:ring-primary-500">
                                 </template>
                                 <div class="mt-1 flex items-center gap-2">
                                     <template x-if="detail.data.company.linkedin_url && editing.field !== 'company_linkedin_url'">

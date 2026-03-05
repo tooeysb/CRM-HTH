@@ -206,16 +206,24 @@ async def process_company(
     async with semaphore:
         company_id = company["id"]
         name = company["name"]
-        domain = company["domain"]
+        raw_domain = company["domain"]
 
-        logger.info("Probing %s (%s)", name, domain)
+        # Support comma-separated domains
+        domains = [d.strip() for d in raw_domain.split(",") if d.strip()]
 
-        # Phase A: Try known URL patterns
-        url = await discover_via_patterns(http_client, domain)
+        logger.info("Probing %s (%s)", name, raw_domain)
 
-        # Phase B: Fallback to homepage link scan
-        if not url:
-            url = await discover_via_homepage(http_client, domain)
+        url = None
+        for domain in domains:
+            # Phase A: Try known URL patterns
+            url = await discover_via_patterns(http_client, domain)
+
+            # Phase B: Fallback to homepage link scan
+            if not url:
+                url = await discover_via_homepage(http_client, domain)
+
+            if url:
+                break
 
         # Phase C: Save result
         now = datetime.now(UTC).isoformat()
