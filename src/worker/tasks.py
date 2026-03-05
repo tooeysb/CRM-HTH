@@ -97,11 +97,9 @@ def promote_direct_contacts(self, user_id: str) -> dict:
                 },
             }
 
-        # Step 2: Link emails for each promoted contact
+        # Step 2: Batch-link emails for all promoted contacts (single pass)
         builder = EmailParticipantBuilder(user_id=uid, db=db)
-        linked = 0
-        for pc in promo_stats["promoted_contacts"]:
-            linked += builder.build_for_contact(pc["id"], pc["email"])
+        linked = builder.build_for_contacts(promo_stats["promoted_contacts"])
         logger.info("[%s] Linked %d email participants", correlation_id, linked)
 
         # Step 3: Batch title enrichment for contacts without titles

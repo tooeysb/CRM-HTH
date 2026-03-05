@@ -91,7 +91,68 @@ class EmailParticipantBuilder:
         )
         return total_created
 
-    def build_for_contact(self, contact_id: UUID, contact_email: str, batch_size: int = 5000) -> int:
+    def build_for_contacts(self, contacts: list[dict], batch_size: int = 5000) -> int:
+        """
+        Build EmailParticipant records for multiple contacts in a single pass.
+
+        Instead of querying the full emails table per contact (N+1), this builds
+        a lookup from all given contacts and streams through emails once.
+
+        Args:
+            contacts: List of {"id": UUID, "email": str} dicts.
+            batch_size: Number of emails to process per batch.
+
+        Returns:
+            Total number of EmailParticipant rows created.
+        """
+        if not contacts:
+            return 0
+
+        contact_lookup = {c["email"].lower().strip(): c["id"] for c in contacts if c.get("email")}
+        logger.info("Batch-linking emails for %d contacts (single pass)", len(contact_lookup))
+
+        total_emails = self.db.execute(
+            select(func.count(Email.id)).where(Email.user_id == self.user_id)
+        ).scalar_one()
+
+        total_created = 0
+        offset = 0
+
+        while offset < total_emails:
+            stmt = (
+                select(Email.id, Email.sender_email, Email.recipient_emails)
+                .where(Email.user_id == self.user_id)
+                .order_by(Email.id)
+                .offset(offset)
+                .limit(batch_size)
+            )
+            rows = self.db.execute(stmt).all()
+            if not rows:
+                break
+
+            batch_created = self._process_batch(rows, contact_lookup)
+            total_created += batch_created
+            offset += batch_size
+
+            if offset % 50_000 == 0 or offset >= total_emails:
+                logger.info(
+                    "Batch link progress: %d/%d emails, %d participants created",
+                    min(offset, total_emails),
+                    total_emails,
+                    total_created,
+                )
+
+        logger.info(
+            "Batch link complete: %d participants created for %d contacts from %d emails",
+            total_created,
+            len(contact_lookup),
+            total_emails,
+        )
+        return total_created
+
+    def build_for_contact(
+        self, contact_id: UUID, contact_email: str, batch_size: int = 5000
+    ) -> int:
         """
         Build EmailParticipant records for a single contact.
 
