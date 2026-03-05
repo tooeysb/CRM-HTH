@@ -479,10 +479,14 @@ function crmApp() {
             }
         },
 
-        async requeueForEnrichment(contactId) {
+        async enrichWithUrl(contactId, linkedinUrl) {
+            if (!linkedinUrl || !linkedinUrl.includes('linkedin.com/in/')) {
+                alert('Please enter a valid LinkedIn profile URL (e.g. https://www.linkedin.com/in/name)');
+                return;
+            }
             const result = await this.apiFetch('contacts/' + contactId, {
                 method: 'PATCH',
-                body: JSON.stringify({ enrichment_status: null, enrichment_notes: null, linkedin_url: null }),
+                body: JSON.stringify({ linkedin_url: linkedinUrl, enrichment_status: null, enrichment_notes: null }),
             });
             if (result) {
                 this.reports.needsHumanResearch = this.reports.needsHumanResearch.filter(c => c.id !== contactId);
