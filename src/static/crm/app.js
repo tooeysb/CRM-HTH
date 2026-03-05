@@ -78,6 +78,9 @@ function crmApp() {
             needsHumanResearch: [],
         },
 
+        // Admin
+        admin: { selected: 'reports' },
+
         // Detail panel
         detail: {
             show: false,
@@ -118,12 +121,11 @@ function crmApp() {
                 this.loadContacts();
             } else if (view === 'companies' && this.companies.items.length === 0) {
                 this.loadCompanies();
-            } else if (view === 'noContact') {
-                this.loadNoContact();
             } else if (view === 'outreach') {
                 this.loadOutreach();
-            } else if (view === 'reports') {
-                this.loadReports();
+            } else if (view === 'admin') {
+                if (this.admin.selected === 'reports') this.loadReports();
+                else if (this.admin.selected === 'noContact') this.loadNoContact();
             }
         },
 
@@ -134,14 +136,22 @@ function crmApp() {
                 return;
             }
             const [view, id] = hash.split('/');
-            if (['dashboard', 'contacts', 'companies', 'noContact', 'outreach', 'reports'].includes(view)) {
+            // Backward compat: old #reports and #noContact redirect to #admin
+            if (view === 'reports' || view === 'noContact') {
+                this.admin.selected = view === 'reports' ? 'reports' : 'noContact';
+                this.currentView = 'admin';
+                window.location.hash = 'admin';
+                this.loadReports();
+                this.loadNoContact();
+                return;
+            }
+            if (['dashboard', 'contacts', 'companies', 'outreach', 'admin'].includes(view)) {
                 this.currentView = view;
                 if (view === 'dashboard') this.loadDashboard();
                 else if (view === 'contacts') this.loadContacts();
                 else if (view === 'companies') this.loadCompanies();
-                else if (view === 'noContact') this.loadNoContact();
                 else if (view === 'outreach') this.loadOutreach();
-                else if (view === 'reports') this.loadReports();
+                else if (view === 'admin') { this.loadReports(); this.loadNoContact(); }
 
                 if (id) {
                     if (view === 'companies') this.openCompanyDetail(id);
@@ -415,7 +425,7 @@ function crmApp() {
         },
 
         async deleteCompany(id) {
-            const name = this.detail.data?.name || 'this company';
+            const name = this.detail.data?.company?.name || 'this company';
             if (!confirm(`Delete "${name}" and all its contacts? This cannot be undone.`)) return;
             const result = await this.apiFetch('companies/' + id, { method: 'DELETE' });
             if (result) {
