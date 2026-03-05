@@ -954,32 +954,30 @@ def get_company(
     if not company:
         raise HTTPException(status_code=404, detail="Company not found")
 
-    # Contacts at this company (active + inactive)
-    all_contacts = (
+    # Active contacts at this company
+    base_filter = [
+        Contact.user_id == uid,
+        Contact.company_id == company.id,
+        Contact.deleted_at.is_(None),
+    ]
+    contacts = (
         db.query(Contact)
-        .filter(
-            Contact.user_id == uid,
-            Contact.company_id == company.id,
-            Contact.deleted_at.is_(None),
-        )
+        .filter(*base_filter, Contact.is_active.is_(True))
+        .order_by(Contact.email_count.desc())
+        .all()
+    )
+    inactive_contacts = (
+        db.query(Contact)
+        .filter(*base_filter, Contact.is_active.is_(False))
         .order_by(Contact.email_count.desc())
         .all()
     )
 
-    contacts = [c for c in all_contacts if c.is_active]
-    inactive_contacts = [c for c in all_contacts if not c.is_active]
-
     contacts_data = [_serialize_contact(c, company.name) for c in contacts]
-    inactive_contacts_data = [
-        {
-            **_serialize_contact(c, company.name),
-            "linkedin_company_raw": c.linkedin_company_raw,
-            "job_change_detected_at": serialize_dt(c.job_change_detected_at),
-        }
-        for c in inactive_contacts
-    ]
+    inactive_contacts_data = [_serialize_contact(c, company.name) for c in inactive_contacts]
 
     # Email summary across all contacts at company
+    all_contacts = contacts + inactive_contacts
     contact_ids = [c.id for c in all_contacts]
     if contact_ids:
         total_emails = (

@@ -21,7 +21,7 @@ import argparse
 import os
 import signal
 import sys
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 # Ensure project root is on PYTHONPATH
@@ -201,7 +201,7 @@ def recheck_contact(
         return "error"
 
     profile = browser.extract_profile(contact.linkedin_url)
-    now = datetime.utcnow().isoformat()
+    now = datetime.now(UTC).isoformat()
 
     # Compare company names
     crm_company = _normalize_company_name(contact.company_name or "")
