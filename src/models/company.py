@@ -147,6 +147,12 @@ class Company(Base, UUIDMixin, TimestampMixin):
         String(500), nullable=True, comment="Company LinkedIn page URL"
     )
 
+    linkedin_name: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        comment="Company name as shown on LinkedIn (for mismatch review)",
+    )
+
     leadership_page_url: Mapped[str | None] = mapped_column(
         String(2048), nullable=True, comment="URL of company leadership/team page"
     )

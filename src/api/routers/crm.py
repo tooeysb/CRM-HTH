@@ -12,6 +12,7 @@ from bs4 import BeautifulSoup
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import case, func, or_, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from src.api.middleware.auth import get_current_user
@@ -161,6 +162,7 @@ class CompanyUpdateRequest(BaseModel):
     industry: str | None = None
     news_search_override: str | None = None
     linkedin_url: str | None = None
+    linkedin_name: str | None = None
     leadership_page_url: str | None = None
     leadership_scraped_at: str | None = None
 
@@ -1691,7 +1693,14 @@ def update_company(
     if company.source_data and company.source_data.get("enr", {}).get("rank_2024"):
         company.company_type = "General Contractor"
 
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="A company with that name already exists for this user",
+        ) from None
     db.refresh(company)
 
     contact_count = (
@@ -2127,6 +2136,90 @@ def report_needs_leadership(
     ]
 
     return {"items": results, "total": len(results)}
+
+
+# ---------------------------------------------------------------------------
+# GET /reports/company-name-mismatches
+# ---------------------------------------------------------------------------
+
+
+@router.get("/reports/company-name-mismatches")
+def report_company_name_mismatches(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_sync_db),
+):
+    """Companies where the LinkedIn name differs from the CRM name."""
+    uid = user.id
+
+    companies = (
+        db.query(Company)
+        .filter(
+            Company.user_id == uid,
+            Company.deleted_at.is_(None),
+            Company.linkedin_name.isnot(None),
+            Company.linkedin_name != "",
+            Company.linkedin_name != Company.name,
+        )
+        .order_by(Company.name.asc())
+        .limit(200)
+        .all()
+    )
+
+    results = [
+        {
+            "id": str(c.id),
+            "name": c.name,
+            "linkedin_name": c.linkedin_name,
+            "linkedin_url": c.linkedin_url,
+        }
+        for c in companies
+    ]
+
+    return {"items": results, "total": len(results)}
+
+
+@router.post("/companies/{company_id}/accept-linkedin-name")
+def accept_linkedin_name(
+    company_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_sync_db),
+):
+    """Apply the LinkedIn name as the company name and clear the mismatch."""
+    uid = user.id
+    company = db.query(Company).filter(Company.id == company_id, Company.user_id == uid).first()
+    if not company:
+        raise HTTPException(status_code=404, detail="Company not found")
+    if not company.linkedin_name:
+        raise HTTPException(status_code=400, detail="No LinkedIn name to apply")
+
+    company.name = company.linkedin_name
+    company.linkedin_name = None
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="A company with that name already exists for this user",
+        ) from None
+    return {"status": "ok", "name": company.name}
+
+
+@router.post("/companies/{company_id}/dismiss-linkedin-name")
+def dismiss_linkedin_name(
+    company_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_sync_db),
+):
+    """Dismiss the LinkedIn name mismatch (keep CRM name)."""
+    uid = user.id
+    company = db.query(Company).filter(Company.id == company_id, Company.user_id == uid).first()
+    if not company:
+        raise HTTPException(status_code=404, detail="Company not found")
+
+    company.linkedin_name = None
+    db.commit()
+    return {"status": "ok"}
 
 
 # ---------------------------------------------------------------------------

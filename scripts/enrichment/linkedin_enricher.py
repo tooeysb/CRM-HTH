@@ -246,7 +246,7 @@ def recheck_contact(
 
 
 def _update_company(crm: CRMClient, search_name: str, profile) -> None:
-    """Search for the company in CRM and update its name + LinkedIn URL."""
+    """Search for the company in CRM and update its LinkedIn URL and track name mismatches."""
     try:
         companies = crm.search_companies(search_name)
         if not companies:
@@ -255,9 +255,9 @@ def _update_company(crm: CRMClient, search_name: str, profile) -> None:
         company = companies[0]
         update_fields: dict = {}
 
-        # Update company name to the canonical LinkedIn name
+        # Track LinkedIn name when it differs from CRM name (for manual review)
         if profile.company_name and profile.company_name != company.get("name"):
-            update_fields["name"] = profile.company_name
+            update_fields["linkedin_name"] = profile.company_name
 
         # Update company LinkedIn URL if not already set
         if profile.company_linkedin_url and not company.get("linkedin_url"):
@@ -277,6 +277,9 @@ def main():
     parser.add_argument("--limit", type=int, default=0, help="Max contacts to process (0=all)")
     parser.add_argument("--headless", action="store_true", help="Run browser headless")
     parser.add_argument("--no-schedule", action="store_true", help="Skip work schedule (run now)")
+    parser.add_argument(
+        "--start-now", action="store_true", help="Skip initial work hours wait but keep pacing"
+    )
     args = parser.parse_args()
 
     browser = LinkedInBrowser(headless=args.headless)
@@ -297,8 +300,12 @@ def main():
     state.reset_if_new_day()
 
     # Initialize work schedule
+    # --start-now: skip work hours checks but keep human-like pacing/breaks
+    # --no-schedule: skip everything (work hours, pacing, breaks)
     schedule = WorkSchedule()
-    if not args.no_schedule:
+    check_hours = not args.no_schedule and not args.start_now
+    use_pacing = not args.no_schedule
+    if check_hours:
         if not schedule.wait_for_work_hours():
             logger.info("Past work hours for today — exiting")
             return
@@ -343,7 +350,7 @@ def main():
         recheck_changes = 0
 
         for contact in recheck_contacts:
-            if not args.no_schedule and not schedule.wait_for_work_hours():
+            if check_hours and not schedule.wait_for_work_hours():
                 logger.info("Work day ended — stopping")
                 break
 
@@ -351,7 +358,7 @@ def main():
                 logger.info("Shutdown requested — stopping gracefully")
                 break
 
-            if not args.no_schedule and schedule.should_take_break():
+            if use_pacing and schedule.should_take_break():
                 schedule.take_break()
 
             try:
@@ -368,7 +375,7 @@ def main():
             state.save()
             processed_count += 1
 
-            if not args.no_schedule:
+            if use_pacing:
                 delay_between_profiles()
 
         logger.info(
@@ -403,7 +410,7 @@ def main():
                 contacts = contacts[:remaining]
 
             for contact in contacts:
-                if not args.no_schedule and not schedule.wait_for_work_hours():
+                if check_hours and not schedule.wait_for_work_hours():
                     logger.info("Work day ended — stopping")
                     break
 
@@ -411,7 +418,7 @@ def main():
                     logger.info("Shutdown requested — stopping gracefully")
                     break
 
-                if not args.no_schedule and schedule.should_take_break():
+                if use_pacing and schedule.should_take_break():
                     schedule.take_break()
 
                 try:
@@ -427,7 +434,7 @@ def main():
 
                 state.save()
 
-                if not args.no_schedule:
+                if use_pacing:
                     delay_between_profiles()
 
             logger.info(
