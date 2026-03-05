@@ -1,9 +1,9 @@
 """
 Batch title enrichment for newly promoted contacts.
-Uses Haiku email signature extraction (fast, batched) then LinkedIn search (slower, rate-limited).
+Uses Haiku email signature extraction (fast, batched).
+LinkedIn enrichment is handled separately by scripts/enrichment/ (Playwright).
 """
 
-import time
 from uuid import UUID
 
 from sqlalchemy import text
@@ -14,16 +14,12 @@ from src.models.contact import Contact
 
 logger = get_logger(__name__)
 
-# Rate limit for LinkedIn/DuckDuckGo searches to avoid getting blocked
-LINKEDIN_SEARCH_DELAY_SECONDS = 2.0
-# Max contacts to process via LinkedIn search per run
-LINKEDIN_BATCH_LIMIT = 100
 # Max contacts to process via Haiku per batch call
 HAIKU_BATCH_SIZE = 20
 
 
 class BatchTitleEnricher:
-    """Batch title enrichment for contacts without titles."""
+    """Batch title enrichment for contacts without titles via Haiku signature extraction."""
 
     def __init__(self, user_id: UUID, db: Session):
         self.user_id = user_id
@@ -32,19 +28,15 @@ class BatchTitleEnricher:
     def enrich_titles(
         self,
         contact_ids: list[UUID] | None = None,
-        linkedin_limit: int = LINKEDIN_BATCH_LIMIT,
     ) -> dict:
         """
-        Enrich titles for contacts missing them.
+        Enrich titles for contacts missing them using Haiku email signature extraction.
 
-        Strategy:
-        1. First pass: batch Haiku signature extraction (fast, handles many at once)
-        2. Second pass: LinkedIn search for remaining (rate-limited, slower)
+        LinkedIn enrichment is NOT done here — use scripts/enrichment/ (Playwright)
+        for that, as it simulates human browsing behavior to avoid rate limiting.
 
         Returns stats dict.
         """
-        from src.api.routers.crm import _search_linkedin_title  # noqa: F811
-
         # 1. Load contacts needing titles
         query = (
             self.db.query(Contact)
@@ -61,7 +53,7 @@ class BatchTitleEnricher:
         logger.info("Found %d contacts needing title enrichment", len(contacts))
 
         if not contacts:
-            return {"total": 0, "haiku_enriched": 0, "linkedin_enriched": 0, "failed": 0}
+            return {"total": 0, "haiku_enriched": 0, "remaining": 0}
 
         # 2. Group by company for efficient batching
         company_groups: dict[UUID | None, list] = {}
@@ -69,48 +61,21 @@ class BatchTitleEnricher:
             company_groups.setdefault(c.company_id, []).append(c)
 
         haiku_enriched = 0
-        linkedin_enriched = 0
-        linkedin_remaining = linkedin_limit
 
         for _company_id, company_contacts in company_groups.items():
             company = company_contacts[0].company
             company_name = company.name if company else ""
-            company_aliases = company.aliases if company else None
-            company_domain = company.domain if company else None
 
-            # Phase 1: Haiku signature batch (fast, handles many at once)
-            still_need_title = []
             haiku_count = self._enrich_via_haiku(company_contacts, company_name)
             haiku_enriched += haiku_count
 
-            for c in company_contacts:
-                if not c.title:
-                    still_need_title.append(c)
-
-            # Phase 2: LinkedIn search (rate-limited) for remaining
-            for contact in still_need_title:
-                if linkedin_remaining <= 0 or not contact.name:
-                    continue
-
-                title = _search_linkedin_title(
-                    contact.name, company_name, company_aliases, company_domain
-                )
-                if title:
-                    contact.title = title
-                    linkedin_enriched += 1
-                    logger.info("LinkedIn title for %s: %s", contact.name, title)
-
-                linkedin_remaining -= 1
-                time.sleep(LINKEDIN_SEARCH_DELAY_SECONDS)
-
         self.db.commit()
-        failed = len(contacts) - haiku_enriched - linkedin_enriched
+        remaining = len(contacts) - haiku_enriched
 
         stats = {
             "total": len(contacts),
             "haiku_enriched": haiku_enriched,
-            "linkedin_enriched": linkedin_enriched,
-            "failed": failed,
+            "remaining": remaining,
         }
         logger.info("Title enrichment complete: %s", stats)
         return stats
