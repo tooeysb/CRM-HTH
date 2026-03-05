@@ -1464,7 +1464,17 @@
                         <!-- Header -->
                         <div class="px-6 pt-6 pb-4 border-b border-gray-100">
                             <div class="pr-8">
-                                <h2 class="text-xl font-semibold text-gray-900" x-text="detail.data.company.name"></h2>
+                                <template x-if="editing.field !== 'company_name_header'">
+                                    <h2 @click="startEditing('company_name_header', detail.data.company.name || '')"
+                                        class="text-xl font-semibold text-gray-900 cursor-pointer hover:bg-gray-50 rounded px-1 -mx-1"
+                                        x-text="detail.data.company.name"></h2>
+                                </template>
+                                <template x-if="editing.field === 'company_name_header'">
+                                    <input type="text" x-model="editing.value"
+                                        @blur="saveCompanyField('name')" @keydown.enter="saveCompanyField('name')" @keydown.escape="cancelEditing()"
+                                        x-ref="editInput"
+                                        class="text-xl font-semibold text-gray-900 border border-primary-300 rounded px-1 -mx-1 py-0 w-full focus:outline-none focus:ring-1 focus:ring-primary-500">
+                                </template>
                                 <template x-if="detail.data.company.domain">
                                     <a :href="'https://' + detail.data.company.domain" target="_blank" rel="noopener"
                                         class="text-sm text-primary-600 hover:text-primary-700" x-text="detail.data.company.domain"></a>
@@ -1685,16 +1695,6 @@
                                                 x-text="detail.data.company.renewal_date ? formatDate(detail.data.company.renewal_date) : '-'"></p>
                                         </div>
                                     </div>
-                                </div>
-
-                                <!-- News Search Override -->
-                                <div class="px-6 py-4 border-b border-gray-100">
-                                    <label class="text-xs font-medium text-gray-500 uppercase tracking-wider">News Search Override</label>
-                                    <p class="mt-0.5 text-[11px] text-gray-400">Custom Google News search term (leave blank for auto-detect)</p>
-                                    <input type="text" x-model="detail.data.company.news_search_override"
-                                        @input.debounce.1000ms="saveCompanyField('news_search_override', detail.data.company.news_search_override)"
-                                        :placeholder="detail.data.company.name"
-                                        class="mt-1 w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent">
                                 </div>
 
                                 <!-- Notes -->

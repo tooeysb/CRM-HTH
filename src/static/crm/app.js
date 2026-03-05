@@ -520,15 +520,6 @@ function crmApp() {
             }
         },
 
-        async saveCompanyField(field, value) {
-            if (this.detail.data?.company) {
-                await this.apiFetch('companies/' + this.detail.id, {
-                    method: 'PATCH',
-                    body: JSON.stringify({ [field]: value || null }),
-                });
-            }
-        },
-
         // ==================== SCAN EMAILS ====================
         async scanCompanyEmails(companyId) {
             this.detail.scanning = true;
