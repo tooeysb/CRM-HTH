@@ -286,12 +286,18 @@ def crm_dashboard(user: User = Depends(get_current_user), db: Session = Depends(
     """CRM dashboard with aggregate statistics."""
     uid = user.id
 
-    total_contacts = (
-        db.query(func.count(Contact.id))
+    # Combined contact counts in a single query (reduces 3 round trips to 1)
+    contact_counts = (
+        db.query(
+            func.count(Contact.id).label("total"),
+            func.count(Contact.id).filter(Contact.is_vip.is_(True)).label("vip"),
+        )
         .filter(Contact.user_id == uid, Contact.deleted_at.is_(None), Contact.is_active.is_(True))
-        .scalar()
-        or 0
+        .first()
     )
+    total_contacts = contact_counts.total if contact_counts else 0
+    vip_count = contact_counts.vip if contact_counts else 0
+
     total_companies = (
         db.query(func.count(Company.id))
         .filter(Company.user_id == uid, Company.deleted_at.is_(None))
@@ -299,18 +305,12 @@ def crm_dashboard(user: User = Depends(get_current_user), db: Session = Depends(
         or 0
     )
     total_emails = db.query(func.count(Email.id)).filter(Email.user_id == uid).scalar() or 0
-    vip_count = (
-        db.query(func.count(Contact.id))
-        .filter(Contact.user_id == uid, Contact.is_vip is True)
-        .scalar()
-        or 0
-    )
 
-    # Top 10 contacts by email_count
+    # Top 10 contacts by email_count (filter deleted + inactive)
     top_contacts_q = (
         db.query(Contact)
         .options(selectinload(Contact.company))
-        .filter(Contact.user_id == uid)
+        .filter(Contact.user_id == uid, Contact.deleted_at.is_(None), Contact.is_active.is_(True))
         .order_by(Contact.email_count.desc())
         .limit(10)
         .all()
@@ -319,18 +319,14 @@ def crm_dashboard(user: User = Depends(get_current_user), db: Session = Depends(
         _serialize_contact(c, c.company.name if c.company else None) for c in top_contacts_q
     ]
 
-    # Recent 20 emails involving CRM contacts (EXISTS avoids costly DISTINCT on join)
-    contact_link = (
-        db.query(EmailParticipant.email_id)
-        .filter(
-            EmailParticipant.email_id == Email.id,
-            EmailParticipant.contact_id.isnot(None),
-        )
-        .exists()
-    )
+    # Recent 20 emails involving CRM contacts (JOIN instead of correlated EXISTS)
     recent_emails_q = (
         db.query(Email)
-        .filter(Email.user_id == uid, contact_link)
+        .join(EmailParticipant, EmailParticipant.email_id == Email.id)
+        .filter(
+            Email.user_id == uid,
+            EmailParticipant.contact_id.isnot(None),
+        )
         .order_by(Email.date.desc())
         .limit(20)
         .all()
