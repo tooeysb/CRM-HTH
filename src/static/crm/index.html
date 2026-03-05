@@ -2055,22 +2055,6 @@
                                 <template x-if="detail.data.company.industry">
                                     <span class="inline-flex items-center ml-2 px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700" x-text="detail.data.company.industry"></span>
                                 </template>
-                                <div class="mt-1 flex items-center gap-1">
-                                    <span class="text-xs text-gray-400">News search:</span>
-                                    <template x-if="editing.field !== 'company_news_search_override'">
-                                        <div class="flex items-center gap-1">
-                                            <span class="text-xs text-gray-600" x-text="detail.data.company.news_search_override || detail.data.company.name"></span>
-                                            <button @click="startEditing('company_news_search_override', detail.data.company.news_search_override || detail.data.company.name)"
-                                                class="text-xs text-gray-400 hover:text-gray-600 cursor-pointer">&#9998;</button>
-                                        </div>
-                                    </template>
-                                    <template x-if="editing.field === 'company_news_search_override'">
-                                        <input type="text" x-model="editing.value"
-                                            @blur="saveCompanyField('news_search_override')" @keydown.enter="saveCompanyField('news_search_override')" @keydown.escape="cancelEditing()"
-                                            x-ref="editInput" placeholder="e.g. DPR Construction"
-                                            class="text-xs border border-primary-300 rounded px-2 py-0.5 w-64 focus:outline-none focus:ring-1 focus:ring-primary-500">
-                                    </template>
-                                </div>
 
                                 <!-- Merge Company -->
                                 <div x-show="!detail.mergeMode" class="mt-2">

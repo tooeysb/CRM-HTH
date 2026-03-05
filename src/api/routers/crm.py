@@ -1825,7 +1825,9 @@ def report_challenging_names(
         db.query(Company)
         .filter(
             Company.user_id == uid,
+            Company.deleted_at.is_(None),
             Company.news_search_override.is_(None),
+            Company.is_approved.is_(False),
         )
         .order_by(Company.name)
         .all()
