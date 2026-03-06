@@ -10,6 +10,7 @@ import random
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import quote_plus
 
 from playwright.sync_api import Browser, BrowserContext, Page, sync_playwright
 
@@ -178,7 +179,7 @@ class LinkedInBrowser:
         query = " ".join(parts)
 
         page = self._page
-        page.goto(f"https://www.google.com/search?q={query}", wait_until="domcontentloaded")
+        page.goto(f"https://www.google.com/search?q={quote_plus(query)}", wait_until="domcontentloaded")
         delay_page_load()
         self._scroll_page()
 
@@ -217,7 +218,7 @@ class LinkedInBrowser:
 
         # Primary search: company name
         query = f'"{company_name}" site:linkedin.com/company/'
-        page.goto(f"https://www.google.com/search?q={query}", wait_until="domcontentloaded")
+        page.goto(f"https://www.google.com/search?q={quote_plus(query)}", wait_until="domcontentloaded")
         delay_page_load()
         self._scroll_page()
 
@@ -231,7 +232,7 @@ class LinkedInBrowser:
             for d in domains[:2]:
                 query = f'"{d}" site:linkedin.com/company/'
                 page.goto(
-                    f"https://www.google.com/search?q={query}",
+                    f"https://www.google.com/search?q={quote_plus(query)}",
                     wait_until="domcontentloaded",
                 )
                 delay_page_load()

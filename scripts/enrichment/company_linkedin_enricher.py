@@ -298,12 +298,19 @@ def enrich_company(
         return "not_found"
 
     if best_score >= min_confidence:
-        # Auto-approve
-        logger.info("ENRICHED: %s -> %s (%s)", name, best_url, best_explanation)
+        # Auto-approve; mark as Tooey Approved when high confidence (score >= 3)
+        high_confidence = best_score >= 3
+        logger.info(
+            "ENRICHED: %s -> %s (%s)%s",
+            name, best_url, best_explanation,
+            " [APPROVED]" if high_confidence else "",
+        )
         if not dry_run:
             update_fields: dict = {"linkedin_url": best_url}
             if best_profile.company_name and best_profile.company_name != name:
                 update_fields["linkedin_name"] = best_profile.company_name
+            if high_confidence:
+                update_fields["is_approved"] = True
             crm.update_company(company_id, **update_fields)
         return "enriched"
     else:

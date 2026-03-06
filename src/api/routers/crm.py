@@ -2199,6 +2199,50 @@ def report_needs_company_linkedin(
 
 
 # ---------------------------------------------------------------------------
+# GET /reports/needs-company-linkedin-review
+# ---------------------------------------------------------------------------
+
+
+@router.get("/reports/needs-company-linkedin-review")
+def report_needs_company_linkedin_review(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_sync_db),
+):
+    """Companies with LinkedIn data that haven't been approved yet — needs manual review."""
+    uid = user.id
+
+    companies = (
+        db.query(Company)
+        .filter(
+            Company.user_id == uid,
+            Company.deleted_at.is_(None),
+            Company.is_approved == False,  # noqa: E712
+            or_(
+                Company.linkedin_url.isnot(None),
+                Company.linkedin_name.like("[review]%"),
+                Company.linkedin_name.like("[not found]%"),
+            ),
+        )
+        .order_by(Company.name.asc())
+        .all()
+    )
+
+    results = [
+        {
+            "id": str(c.id),
+            "name": c.name,
+            "domain": c.domain,
+            "linkedin_url": c.linkedin_url,
+            "linkedin_name": c.linkedin_name,
+            "company_type": c.company_type,
+        }
+        for c in companies
+    ]
+
+    return {"items": results, "total": len(results)}
+
+
+# ---------------------------------------------------------------------------
 # GET /reports/company-name-mismatches
 # ---------------------------------------------------------------------------
 

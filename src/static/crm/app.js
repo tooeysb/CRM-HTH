@@ -511,6 +511,17 @@ function crmApp() {
             }
         },
 
+        async approveCompanyLinkedIn(companyId) {
+            const result = await this.apiFetch('companies/' + companyId, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ is_approved: true }),
+            });
+            if (result) {
+                this.reports.linkedinReview = this.reports.linkedinReview.filter(c => c.id !== companyId);
+            }
+        },
+
         // ==================== CONTACT EMAILS ====================
         async loadContactEmails(id, reset = false) {
             if (reset) {
@@ -789,7 +800,7 @@ function crmApp() {
         // ==================== REPORTS ====================
         async loadReports() {
             this.reports.loading = true;
-            const [names, noPeople, needsLI, browserEnrich, humanResearch, jobChanges, nameMismatches, needsLeadership] = await Promise.all([
+            const [names, noPeople, needsLI, browserEnrich, humanResearch, jobChanges, nameMismatches, needsLeadership, linkedinReview] = await Promise.all([
                 this.apiFetch('reports/challenging-names'),
                 this.apiFetch('reports/companies-without-people'),
                 this.apiFetch('reports/needs-linkedin-url'),
@@ -798,6 +809,7 @@ function crmApp() {
                 this.apiFetch('reports/job-changes'),
                 this.apiFetch('reports/company-name-mismatches'),
                 this.apiFetch('reports/needs-leadership-discovery'),
+                this.apiFetch('reports/needs-company-linkedin-review'),
             ]);
             if (names) this.reports.challengingNames = names.items || [];
             if (noPeople) this.reports.companiesWithoutPeople = noPeople.items || [];
@@ -807,6 +819,7 @@ function crmApp() {
             if (jobChanges) this.reports.jobChanges = jobChanges.items || [];
             if (nameMismatches) this.reports.nameMismatches = nameMismatches.items || [];
             if (needsLeadership) this.reports.needsLeadership = needsLeadership.items || [];
+            if (linkedinReview) this.reports.linkedinReview = linkedinReview.items || [];
             this.reports.loading = false;
         },
 

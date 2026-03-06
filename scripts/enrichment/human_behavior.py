@@ -111,18 +111,15 @@ class WorkSchedule:
 
 
 def delay_between_profiles():
-    """Wait 45-120 seconds between profiles (never near exactly 60)."""
-    while True:
-        delay = random.uniform(45, 120)
-        if delay < 58 or delay > 62:
-            break
+    """Wait 15-25 seconds between profiles."""
+    delay = random.uniform(15, 25)
     logger.info("Waiting %.0f seconds before next profile", delay)
     time.sleep(delay)
 
 
 def delay_between_clicks():
-    """Wait 2-8 seconds between page interactions."""
-    time.sleep(random.uniform(2, 8))
+    """Wait 4-6 seconds between page interactions."""
+    time.sleep(random.uniform(4, 6))
 
 
 def delay_page_load():
