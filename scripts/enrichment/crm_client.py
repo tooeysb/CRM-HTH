@@ -83,6 +83,12 @@ class CRMClient:
         resp.raise_for_status()
         return resp.json()
 
+    def get_needs_company_linkedin(self) -> list[dict]:
+        """Companies without a LinkedIn company page URL."""
+        resp = self._client.get("/crm/api/reports/needs-company-linkedin")
+        resp.raise_for_status()
+        return resp.json()["items"]
+
     def get_needs_leadership(self) -> list[dict]:
         """Companies with a domain but no leadership page scraped."""
         resp = self._client.get("/crm/api/reports/needs-leadership-discovery")

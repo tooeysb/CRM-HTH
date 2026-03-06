@@ -16,7 +16,7 @@ from src.core.logging import get_logger
 
 logger = get_logger(__name__)
 
-STATE_FILE = Path(__file__).parent.parent.parent / ".enrichment_state.json"
+DEFAULT_STATE_FILE = Path(__file__).parent.parent.parent / ".enrichment_state.json"
 
 
 @dataclass
@@ -29,6 +29,7 @@ class EnrichmentState:
     total_enriched: int = 0
     total_skipped: int = 0
     total_errors: int = 0
+    _state_file: Path = field(default=DEFAULT_STATE_FILE, repr=False, compare=False)
 
     def mark_processed(self, contact_id: str):
         if contact_id not in self.processed_ids:
@@ -59,15 +60,24 @@ class EnrichmentState:
 
     def save(self):
         self.last_run_date = date.today().isoformat()
-        STATE_FILE.write_text(json.dumps(asdict(self), indent=2))
+        data = asdict(self)
+        data.pop("_state_file", None)
+        self._state_file.write_text(json.dumps(data, indent=2))
 
     @classmethod
-    def load(cls) -> EnrichmentState:
-        if STATE_FILE.exists():
+    def load(cls, state_file: Path | None = None) -> EnrichmentState:
+        path = state_file or DEFAULT_STATE_FILE
+        if path.exists():
             try:
-                data = json.loads(STATE_FILE.read_text())
-                return cls(**data)
+                data = json.loads(path.read_text())
+                state = cls(**data)
+                state._state_file = path
+                return state
             except (json.JSONDecodeError, TypeError):
                 logger.warning("Corrupt state file — starting fresh")
-                return cls()
-        return cls()
+                state = cls()
+                state._state_file = path
+                return state
+        state = cls()
+        state._state_file = path
+        return state

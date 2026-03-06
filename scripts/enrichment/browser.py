@@ -31,6 +31,17 @@ class LinkedInProfile:
     company_linkedin_url: str | None = None
 
 
+@dataclass
+class LinkedInCompanyProfile:
+    """Extracted LinkedIn company page data."""
+
+    company_name: str | None = None
+    linkedin_url: str | None = None
+    website_url: str | None = None
+    industry: str | None = None
+    description: str | None = None
+
+
 class LinkedInBrowser:
     """Manages a Playwright browser session for LinkedIn browsing."""
 
@@ -189,7 +200,150 @@ class LinkedInBrowser:
         return None
 
     # ------------------------------------------------------------------
-    # Profile extraction
+    # Company LinkedIn search
+    # ------------------------------------------------------------------
+
+    def search_google_for_company_linkedin(
+        self, company_name: str, domain: str | None = None
+    ) -> list[str]:
+        """
+        Search Google for a company's LinkedIn page.
+
+        Returns up to 3 candidate linkedin.com/company/ URLs.
+        Tries name-based search first, then domain-based fallback.
+        """
+        page = self._page
+        candidates: list[str] = []
+
+        # Primary search: company name
+        query = f'"{company_name}" site:linkedin.com/company/'
+        page.goto(f"https://www.google.com/search?q={query}", wait_until="domcontentloaded")
+        delay_page_load()
+        self._scroll_page()
+
+        candidates.extend(self._extract_company_slugs_from_page())
+
+        # Domain-based fallback if we have a domain and need more candidates
+        if domain and len(candidates) < 2:
+            delay_between_clicks()
+            # Try each domain if comma-separated
+            domains = [d.strip() for d in domain.split(",") if d.strip()]
+            for d in domains[:2]:
+                query = f'"{d}" site:linkedin.com/company/'
+                page.goto(
+                    f"https://www.google.com/search?q={query}",
+                    wait_until="domcontentloaded",
+                )
+                delay_page_load()
+                self._scroll_page()
+                for url in self._extract_company_slugs_from_page():
+                    if url not in candidates:
+                        candidates.append(url)
+                if len(candidates) >= 3:
+                    break
+
+        if candidates:
+            logger.info(
+                "Found %d company LinkedIn candidate(s) for %s", len(candidates), company_name
+            )
+        else:
+            logger.warning("No LinkedIn company page found for: %s", company_name)
+
+        return candidates[:3]
+
+    def _extract_company_slugs_from_page(self) -> list[str]:
+        """Extract unique linkedin.com/company/ URLs from current Google results page."""
+        content = self._page.content()
+        matches = re.findall(r"https?://(?:www\.)?linkedin\.com/company/([a-zA-Z0-9_-]+)", content)
+        seen: list[str] = []
+        for slug in matches:
+            if slug not in seen and slug not in ("company", "companies"):
+                seen.append(slug)
+        return [f"https://www.linkedin.com/company/{s}/" for s in seen]
+
+    # ------------------------------------------------------------------
+    # Company profile extraction
+    # ------------------------------------------------------------------
+
+    def extract_company_profile(self, company_url: str) -> LinkedInCompanyProfile:
+        """Navigate to a LinkedIn company page and extract profile data."""
+        result = LinkedInCompanyProfile(linkedin_url=company_url)
+        page = self._page
+
+        try:
+            # Visit the About tab for the richest data
+            about_url = company_url.rstrip("/") + "/about/"
+            page.goto(about_url, wait_until="domcontentloaded", timeout=15000)
+            delay_page_load()
+
+            if self._is_login_page():
+                logger.error("LinkedIn session expired — re-run with --setup")
+                return result
+
+            self._scroll_page()
+
+            # Company name from h1
+            h1 = page.query_selector("h1")
+            if h1:
+                name = h1.inner_text().strip()
+                if name and len(name) < 200:
+                    result.company_name = name
+
+            # Fallback: page title "Company Name | LinkedIn"
+            if not result.company_name:
+                title = page.title()
+                if title and " | LinkedIn" in title:
+                    result.company_name = title.split(" | LinkedIn")[0].strip()
+
+            # Extract structured data from page text (resilient to layout changes)
+            page_text = page.inner_text("body")
+
+            # Website URL — look for a line after "Website" label
+            website_match = re.search(r"Website\s*\n\s*(.+)", page_text)
+            if website_match:
+                candidate = website_match.group(1).strip()
+                # Validate it looks like a domain
+                if "." in candidate and len(candidate) < 100 and " " not in candidate:
+                    result.website_url = candidate
+
+            # Also check for website redirect links
+            if not result.website_url:
+                website_links = page.query_selector_all("a[href*='/company/'][href*='/website']")
+                for link in website_links:
+                    text = link.inner_text().strip()
+                    if text and "." in text and len(text) < 100:
+                        result.website_url = text
+                        break
+
+            # Industry
+            industry_match = re.search(r"Industry\s*\n\s*(.+)", page_text)
+            if industry_match:
+                result.industry = industry_match.group(1).strip()
+
+            # Description — first large paragraph in the overview section
+            overview_match = re.search(
+                r"Overview\s*\n\s*(.+?)(?:\n\n|\nWebsite|\nIndustry)", page_text, re.DOTALL
+            )
+            if overview_match:
+                desc = overview_match.group(1).strip()
+                if len(desc) > 20:
+                    result.description = desc[:500]
+
+            delay_between_clicks()
+            logger.info(
+                "Extracted company profile: name=%s, website=%s, industry=%s",
+                result.company_name,
+                result.website_url,
+                result.industry,
+            )
+
+        except Exception as e:
+            logger.error("Error extracting company profile from %s: %s", company_url, e)
+
+        return result
+
+    # ------------------------------------------------------------------
+    # Personal profile extraction
     # ------------------------------------------------------------------
 
     def extract_profile(self, linkedin_url: str) -> LinkedInProfile:
