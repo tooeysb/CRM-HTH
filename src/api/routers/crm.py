@@ -1922,7 +1922,6 @@ def report_needs_linkedin_url(
             Contact.linkedin_url.is_(None),
         )
         .order_by(Contact.email_count.desc())
-        .limit(100)
         .all()
     )
 
