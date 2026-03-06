@@ -111,17 +111,17 @@ class WorkSchedule:
 
 
 def delay_between_profiles():
-    """Wait 15-25 seconds between profiles."""
-    delay = random.uniform(15, 25)
+    """Wait 60-90 seconds between profiles (~427 companies over 10 hours)."""
+    delay = random.uniform(60, 90)
     logger.info("Waiting %.0f seconds before next profile", delay)
     time.sleep(delay)
 
 
 def delay_between_clicks():
-    """Wait 4-6 seconds between page interactions."""
-    time.sleep(random.uniform(4, 6))
+    """Wait 4-8 seconds between page interactions."""
+    time.sleep(random.uniform(4, 8))
 
 
 def delay_page_load():
-    """Wait 3-6 seconds for page to fully render."""
-    time.sleep(random.uniform(3, 6))
+    """Wait 4-7 seconds for page to fully render."""
+    time.sleep(random.uniform(4, 7))

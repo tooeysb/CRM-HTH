@@ -162,6 +162,46 @@ class LinkedInBrowser:
         url = self._page.url
         return "/login" in url or "/authwall" in url or "/checkpoint" in url
 
+    def _check_and_handle_captcha(self) -> bool:
+        """Detect CAPTCHA from Google or LinkedIn and back off if found.
+
+        Returns True if a CAPTCHA was detected (and we waited it out).
+        """
+        import time
+
+        url = self._page.url
+        page_text = ""
+        try:
+            page_text = self._page.inner_text("body")
+        except Exception:
+            pass
+
+        text_lower = page_text.lower()
+
+        is_captcha = (
+            # Google CAPTCHA signals
+            "/sorry/" in url
+            or "recaptcha" in url
+            # LinkedIn CAPTCHA / challenge signals
+            "/checkpoint/challenge" in url
+            or "security verification" in text_lower
+            or "verify you're a real person" in text_lower
+            or "let's do a quick security check" in text_lower
+            # Generic signals
+            or "unusual traffic" in text_lower
+            or "captcha" in text_lower
+            or "are you a robot" in text_lower
+        )
+
+        if is_captcha:
+            wait_minutes = random.uniform(5, 10)
+            logger.warning(
+                "CAPTCHA detected at %s — backing off for %.1f minutes", url, wait_minutes
+            )
+            time.sleep(wait_minutes * 60)
+            return True
+        return False
+
     # ------------------------------------------------------------------
     # Google search
     # ------------------------------------------------------------------
@@ -181,6 +221,10 @@ class LinkedInBrowser:
         page = self._page
         page.goto(f"https://www.google.com/search?q={quote_plus(query)}", wait_until="domcontentloaded")
         delay_page_load()
+        if self._check_and_handle_captcha():
+            # Retry the search after CAPTCHA backoff
+            page.goto(f"https://www.google.com/search?q={quote_plus(query)}", wait_until="domcontentloaded")
+            delay_page_load()
         self._scroll_page()
 
         # Extract LinkedIn profile URLs from search results
@@ -220,6 +264,9 @@ class LinkedInBrowser:
         query = f'"{company_name}" site:linkedin.com/company/'
         page.goto(f"https://www.google.com/search?q={quote_plus(query)}", wait_until="domcontentloaded")
         delay_page_load()
+        if self._check_and_handle_captcha():
+            page.goto(f"https://www.google.com/search?q={quote_plus(query)}", wait_until="domcontentloaded")
+            delay_page_load()
         self._scroll_page()
 
         candidates.extend(self._extract_company_slugs_from_page())
@@ -236,6 +283,12 @@ class LinkedInBrowser:
                     wait_until="domcontentloaded",
                 )
                 delay_page_load()
+                if self._check_and_handle_captcha():
+                    page.goto(
+                        f"https://www.google.com/search?q={quote_plus(query)}",
+                        wait_until="domcontentloaded",
+                    )
+                    delay_page_load()
                 self._scroll_page()
                 for url in self._extract_company_slugs_from_page():
                     if url not in candidates:
@@ -276,6 +329,11 @@ class LinkedInBrowser:
             about_url = company_url.rstrip("/") + "/about/"
             page.goto(about_url, wait_until="domcontentloaded", timeout=15000)
             delay_page_load()
+
+            if self._check_and_handle_captcha():
+                # Retry after backoff
+                page.goto(about_url, wait_until="domcontentloaded", timeout=15000)
+                delay_page_load()
 
             if self._is_login_page():
                 logger.error("LinkedIn session expired — re-run with --setup")
@@ -356,6 +414,10 @@ class LinkedInBrowser:
             page.goto(linkedin_url, wait_until="domcontentloaded", timeout=15000)
             delay_page_load()
 
+            if self._check_and_handle_captcha():
+                page.goto(linkedin_url, wait_until="domcontentloaded", timeout=15000)
+                delay_page_load()
+
             if self._is_login_page():
                 logger.error("LinkedIn session expired — re-run with --setup")
                 return result
@@ -410,6 +472,9 @@ class LinkedInBrowser:
         try:
             page.goto(company_url, wait_until="domcontentloaded", timeout=15000)
             delay_page_load()
+            if self._check_and_handle_captcha():
+                page.goto(company_url, wait_until="domcontentloaded", timeout=15000)
+                delay_page_load()
             self._scroll_page()
 
             # Company name is in the h1 element
