@@ -71,13 +71,11 @@ function crmApp() {
         reports: {
             loading: false,
             selected: localStorage.getItem('crm_report_tab') || 'needsLinkedIn',
-            challengingNames: [],
             companiesWithoutPeople: [],
             needsLinkedIn: [],
             needsBrowserEnrich: [],
             needsHumanResearch: [],
             jobChanges: [],
-            nameMismatches: [],
             needsLeadership: [],
         },
 
@@ -517,19 +515,6 @@ function crmApp() {
             }
         },
 
-        async acceptLinkedInName(companyId) {
-            const result = await this.apiFetch('companies/' + companyId + '/accept-linkedin-name', { method: 'POST' });
-            if (result) {
-                this.reports.nameMismatches = this.reports.nameMismatches.filter(c => c.id !== companyId);
-            }
-        },
-
-        async dismissLinkedInName(companyId) {
-            const result = await this.apiFetch('companies/' + companyId + '/dismiss-linkedin-name', { method: 'POST' });
-            if (result) {
-                this.reports.nameMismatches = this.reports.nameMismatches.filter(c => c.id !== companyId);
-            }
-        },
 
         async approveCompanyLinkedIn(companyId) {
             const result = await this.apiFetch('companies/' + companyId, {
@@ -918,26 +903,22 @@ function crmApp() {
 
         async loadReports() {
             this.reports.loading = true;
-            const [names, noPeople, needsLI, browserEnrich, humanResearch, jobChanges, nameMismatches, needsLeadership, linkedinReview, missingLinkedIn, logoReview] = await Promise.all([
-                this.apiFetch('reports/challenging-names'),
+            const [noPeople, needsLI, browserEnrich, humanResearch, jobChanges, needsLeadership, linkedinReview, missingLinkedIn, logoReview] = await Promise.all([
                 this.apiFetch('reports/companies-without-people'),
                 this.apiFetch('reports/needs-linkedin-url'),
                 this.apiFetch('reports/needs-browser-enrich'),
                 this.apiFetch('reports/needs-human-research'),
                 this.apiFetch('reports/job-changes'),
-                this.apiFetch('reports/company-name-mismatches'),
                 this.apiFetch('reports/needs-leadership-discovery'),
                 this.apiFetch('reports/needs-company-linkedin-review'),
                 this.apiFetch('reports/missing-company-linkedin'),
                 this.apiFetch('reports/logo-review'),
             ]);
-            if (names) this.reports.challengingNames = names.items || [];
             if (noPeople) this.reports.companiesWithoutPeople = noPeople.items || [];
             if (needsLI) this.reports.needsLinkedIn = needsLI.items || [];
             if (browserEnrich) this.reports.needsBrowserEnrich = browserEnrich.items || [];
             if (humanResearch) this.reports.needsHumanResearch = humanResearch.items || [];
             if (jobChanges) this.reports.jobChanges = jobChanges.items || [];
-            if (nameMismatches) this.reports.nameMismatches = nameMismatches.items || [];
             if (needsLeadership) this.reports.needsLeadership = needsLeadership.items || [];
             if (linkedinReview) this.reports.linkedinReview = linkedinReview.items || [];
             if (missingLinkedIn) this.reports.missingLinkedIn = missingLinkedIn.items || [];
