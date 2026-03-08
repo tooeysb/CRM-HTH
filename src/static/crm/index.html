@@ -2678,9 +2678,15 @@
                                 <!-- ENR Data -->
                                 <template x-if="detail.data.company.source_data?.enr">
                                     <div class="mx-6 my-4 rounded-xl bg-orange-50/50 border border-orange-100 p-5">
-                                        <div class="flex items-center mb-3">
+                                        <div class="flex items-center gap-2 mb-3">
                                             <span class="text-sm font-semibold text-orange-900">ENR Top 400 General Contractor</span>
+                                            <template x-if="detail.data.company.source_data.enr.has_subsidiaries">
+                                                <span class="text-[10px] px-1.5 py-0.5 rounded bg-orange-100 text-orange-600 font-medium">Has Subsidiaries</span>
+                                            </template>
                                         </div>
+                                        <template x-if="detail.data.company.source_data.enr.firm_name">
+                                            <p class="text-xs text-gray-500 -mt-2 mb-3" x-text="'ENR Name: ' + detail.data.company.source_data.enr.firm_name"></p>
+                                        </template>
                                         <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-4">
                                             <div>
                                                 <span class="text-[11px] text-orange-600 uppercase tracking-wider">2024 Rank</span>
@@ -2703,7 +2709,7 @@
                                             <div>
                                                 <span class="text-[11px] text-orange-600 uppercase tracking-wider">Int'l Revenue</span>
                                                 <p class="text-sm font-medium text-gray-900"
-                                                    x-text="detail.data.company.source_data.enr.intl_revenue_mil ? '$' + detail.data.company.source_data.enr.intl_revenue_mil.toFixed(0) + 'M' : '-'"></p>
+                                                    x-text="detail.data.company.source_data.enr.intl_revenue_mil ? '$' + (detail.data.company.source_data.enr.intl_revenue_mil >= 1000 ? (detail.data.company.source_data.enr.intl_revenue_mil / 1000).toFixed(1) + 'B' : detail.data.company.source_data.enr.intl_revenue_mil.toFixed(0) + 'M') : '-'"></p>
                                             </div>
                                             <div>
                                                 <span class="text-[11px] text-orange-600 uppercase tracking-wider">CM-at-Risk</span>
@@ -2716,7 +2722,7 @@
                                             <div class="mt-1 flex flex-wrap gap-1.5">
                                                 <template x-for="[sector, pct] in Object.entries(detail.data.company.source_data.enr.sectors || {}).filter(([k,v]) => v > 0).sort((a,b) => b[1] - a[1])" :key="sector">
                                                     <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] bg-white border border-orange-200 text-orange-800">
-                                                        <span x-text="sector.replaceAll('_', ' ')"></span>
+                                                        <span x-text="sector"></span>
                                                         <span class="ml-1 font-bold" x-text="pct + '%'"></span>
                                                     </span>
                                                 </template>
