@@ -183,6 +183,7 @@ class CompanyUpdateRequest(BaseModel):
     logo_hash_website: str | None = None
     logo_hash_linkedin: str | None = None
     logo_hash_distance: int | None = None
+    source_data: dict | None = None
 
 
 # ---------------------------------------------------------------------------
