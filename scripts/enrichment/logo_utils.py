@@ -120,7 +120,9 @@ def extract_website_logo(page: Page, domain: str) -> LogoResult:
 
     # Handle comma-separated domains — use the first one
     primary_domain = domain.split(",")[0].strip()
-    url = f"https://www.{primary_domain}" if not primary_domain.startswith("http") else primary_domain
+    url = (
+        f"https://www.{primary_domain}" if not primary_domain.startswith("http") else primary_domain
+    )
 
     try:
         resp = page.goto(url, wait_until="domcontentloaded", timeout=15000)
@@ -289,7 +291,9 @@ def extract_website_title(page: Page) -> str | None:
         if title_el:
             title = title_el.inner_text().strip()
             # Remove common suffixes like " | Home", " - Welcome", etc.
-            title = re.split(r"\s*[|–—-]\s*(?:Home|Welcome|Official).*$", title, flags=re.IGNORECASE)[0]
+            title = re.split(
+                r"\s*[|–—-]\s*(?:Home|Welcome|Official).*$", title, flags=re.IGNORECASE
+            )[0]
             if title and len(title.strip()) > 1:
                 return title.strip()
     except Exception:

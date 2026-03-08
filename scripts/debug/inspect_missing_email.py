@@ -5,19 +5,20 @@ Inspect a missing email to understand why our date queries didn't fetch it.
 
 import json
 import sys
-from pathlib import Path
-from datetime import datetime
 from email.utils import parsedate_to_datetime
+from pathlib import Path
 
 project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 
 from sqlalchemy import create_engine, func
 from sqlalchemy.orm import Session
+
 from src.core.config import settings
+from src.integrations.gmail.client import GmailClient
 from src.models.account import GmailAccount
 from src.models.email import Email
-from src.integrations.gmail.client import GmailClient
+
 
 def main():
     # Missing email ID from previous test
@@ -26,16 +27,20 @@ def main():
     engine = create_engine(settings.database_url)
 
     with Session(engine) as db:
-        account = db.query(GmailAccount).filter(
-            GmailAccount.account_email == "2e@procore.com"
-        ).first()
+        account = (
+            db.query(GmailAccount).filter(GmailAccount.account_email == "2e@procore.com").first()
+        )
 
         if not account:
             print("ERROR: Could not find account")
             return
 
         # Parse credentials
-        credentials_dict = json.loads(account.credentials) if isinstance(account.credentials, str) else account.credentials
+        credentials_dict = (
+            json.loads(account.credentials)
+            if isinstance(account.credentials, str)
+            else account.credentials
+        )
 
         gmail_client = GmailClient(credentials=credentials_dict)
 
@@ -44,15 +49,20 @@ def main():
         print()
 
         # Fetch full message details
-        message = gmail_client.gmail_service.users().messages().get(
-            userId='me',
-            id=missing_id,
-            format='metadata',
-            metadataHeaders=['From', 'To', 'Subject', 'Date']
-        ).execute()
+        message = (
+            gmail_client.gmail_service.users()
+            .messages()
+            .get(
+                userId="me",
+                id=missing_id,
+                format="metadata",
+                metadataHeaders=["From", "To", "Subject", "Date"],
+            )
+            .execute()
+        )
 
         # Extract headers
-        headers = {h['name']: h['value'] for h in message.get('payload', {}).get('headers', [])}
+        headers = {h["name"]: h["value"] for h in message.get("payload", {}).get("headers", [])}
 
         print("Email Details:")
         print("-" * 80)
@@ -65,7 +75,7 @@ def main():
         print()
 
         # Parse date
-        date_str = headers.get('Date')
+        date_str = headers.get("Date")
         if date_str:
             try:
                 email_date = parsedate_to_datetime(date_str)
@@ -78,13 +88,9 @@ def main():
                 print()
 
         # Get database date range
-        oldest = db.query(func.min(Email.date)).filter(
-            Email.account_id == account.id
-        ).scalar()
+        oldest = db.query(func.min(Email.date)).filter(Email.account_id == account.id).scalar()
 
-        newest = db.query(func.max(Email.date)).filter(
-            Email.account_id == account.id
-        ).scalar()
+        newest = db.query(func.max(Email.date)).filter(Email.account_id == account.id).scalar()
 
         print("Database Date Range:")
         print("-" * 80)
@@ -97,7 +103,7 @@ def main():
             print("-" * 80)
 
             if email_date < oldest:
-                print(f"❌ This email is OLDER than our oldest DB email!")
+                print("❌ This email is OLDER than our oldest DB email!")
                 print(f"   Email date:    {email_date}")
                 print(f"   Oldest in DB:  {oldest}")
                 print(f"   Gap:           {(oldest - email_date).days} days")
@@ -113,7 +119,7 @@ def main():
                 print("   - Pagination cutoff")
 
             elif email_date > newest:
-                print(f"❌ This email is NEWER than our newest DB email!")
+                print("❌ This email is NEWER than our newest DB email!")
                 print(f"   Email date:    {email_date}")
                 print(f"   Newest in DB:  {newest}")
                 print(f"   Gap:           {(email_date - newest).days} days")
@@ -129,7 +135,7 @@ def main():
                 print("   - Exact date boundary (after: vs on the date)")
 
             else:
-                print(f"⚠️  This email is WITHIN our DB date range!")
+                print("⚠️  This email is WITHIN our DB date range!")
                 print(f"   Email date:    {email_date}")
                 print(f"   DB range:      {oldest} to {newest}")
                 print()
@@ -143,27 +149,28 @@ def main():
                 print("   - Was restored from trash")
 
         # Check labels
-        labels = message.get('labelIds', [])
+        labels = message.get("labelIds", [])
         print()
         print("Labels:")
         print("-" * 80)
         for label in labels:
             print(f"  - {label}")
 
-        if 'SPAM' in labels:
+        if "SPAM" in labels:
             print()
             print("🚨 This email is in SPAM!")
             print("   Our queries might be filtering out SPAM by default.")
 
-        if 'TRASH' in labels:
+        if "TRASH" in labels:
             print()
             print("🚨 This email is in TRASH!")
             print("   Our queries might be filtering out TRASH by default.")
 
-        if 'INBOX' not in labels and 'SENT' not in labels:
+        if "INBOX" not in labels and "SENT" not in labels:
             print()
             print("⚠️  This email is NOT in INBOX or SENT!")
             print("   It might require `in:anywhere` or `in:all` to fetch.")
+
 
 if __name__ == "__main__":
     main()

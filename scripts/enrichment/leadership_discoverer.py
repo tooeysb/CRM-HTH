@@ -93,6 +93,8 @@ LEADERSHIP_URL_PATTERNS = [
     "/about-us/our-leadership-team",
     "/about/leadership-team",
     "/why-us/leadership",
+    "/management-team",
+    "/about/management-team",
 ]
 
 # Name patterns to exclude (not real people)
@@ -734,9 +736,7 @@ class LeadershipScraper:
                 for line in sibling.split("\n"):
                     line = line.strip()
                     if line and TITLE_KEYWORDS.search(line):
-                        results.append(
-                            LeaderPerson(name=name_text, title=line[:255])
-                        )
+                        results.append(LeaderPerson(name=name_text, title=line[:255]))
                         break
 
         return results
@@ -1023,11 +1023,15 @@ def main():
         scraper = LeadershipScraper(headless=args.headless)
 
     # Load state for resume
-    state = _load_state() if args.resume else {
-        "processed_ids": [],
-        "total_contacts_added": 0,
-        "total_errors": 0,
-    }
+    state = (
+        _load_state()
+        if args.resume
+        else {
+            "processed_ids": [],
+            "total_contacts_added": 0,
+            "total_errors": 0,
+        }
+    )
     processed_ids = set(state.get("processed_ids", []))
 
     try:
@@ -1086,9 +1090,7 @@ def main():
                 # Update state
                 processed_ids.add(company["id"])
                 state["processed_ids"] = list(processed_ids)
-                state["total_contacts_added"] = (
-                    state.get("total_contacts_added", 0) + added
-                )
+                state["total_contacts_added"] = state.get("total_contacts_added", 0) + added
                 _save_state(state)
 
             except Exception as e:

@@ -39,7 +39,11 @@ load_dotenv(PROJECT_ROOT / ".env")
 
 from scripts.enrichment.browser import LinkedInBrowser, LinkedInCompanyProfile  # noqa: E402
 from scripts.enrichment.crm_client import CRMClient  # noqa: E402
-from scripts.enrichment.human_behavior import delay_between_clicks, delay_between_profiles  # noqa: E402
+from scripts.enrichment.human_behavior import (
+    delay_between_clicks,
+)
+
+# noqa: E402
 from src.core.config import settings  # noqa: E402
 from src.core.logging import get_logger  # noqa: E402
 
@@ -253,7 +257,8 @@ def phase_google(args):
     if args.retry_misses:
         # Only retry companies that were searched but got zero candidates
         miss_ids = {
-            cid for cid, v in candidates_data.items()
+            cid
+            for cid, v in candidates_data.items()
             if v.get("searched") and not v.get("candidate_urls")
         }
         companies = [c for c in all_companies if c["id"] in miss_ids]
@@ -297,7 +302,9 @@ def phase_google(args):
             name = company["name"]
             domain = company.get("domain")
 
-            logger.info("[%d/%d] Searching: %s (domain: %s)", i + 1, len(companies), name, domain or "none")
+            logger.info(
+                "[%d/%d] Searching: %s (domain: %s)", i + 1, len(companies), name, domain or "none"
+            )
 
             urls = browser.search_google_for_company_linkedin(name, domain, engine=args.engine)
 
@@ -359,18 +366,21 @@ def phase_linkedin(args):
 
     # Filter to companies with candidates that haven't been enriched yet
     to_process = [
-        v for v in candidates_data.values()
+        v
+        for v in candidates_data.values()
         if v.get("searched") and not v.get("enriched") and v.get("candidate_urls")
     ]
     # Also handle companies with no candidates (mark as not found)
     no_candidates = [
-        v for v in candidates_data.values()
+        v
+        for v in candidates_data.values()
         if v.get("searched") and not v.get("enriched") and not v.get("candidate_urls")
     ]
 
     logger.info(
         "%d companies with candidates, %d with no candidates",
-        len(to_process), len(no_candidates),
+        len(to_process),
+        len(no_candidates),
     )
 
     # Mark no-candidate companies as not found
@@ -413,7 +423,9 @@ def phase_linkedin(args):
             domain = company.get("domain")
             urls = company["candidate_urls"]
 
-            logger.info("[%d/%d] Visiting: %s (%d candidates)", i + 1, len(to_process), name, len(urls))
+            logger.info(
+                "[%d/%d] Visiting: %s (%d candidates)", i + 1, len(to_process), name, len(urls)
+            )
 
             # Visit each candidate and score
             best_score = -1
@@ -454,7 +466,9 @@ def phase_linkedin(args):
                 high_confidence = best_score >= 3
                 logger.info(
                     "ENRICHED: %s -> %s (%s)%s",
-                    name, best_url, best_explanation,
+                    name,
+                    best_url,
+                    best_explanation,
                     " [APPROVED]" if high_confidence else "",
                 )
                 if not args.dry_run:
@@ -493,7 +507,9 @@ def phase_linkedin(args):
 
     logger.info(
         "Phase 2 complete: %d enriched, %d needs review, %d not found",
-        enriched_count, review_count, not_found_count,
+        enriched_count,
+        review_count,
+        not_found_count,
     )
 
 

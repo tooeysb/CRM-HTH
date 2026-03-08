@@ -240,9 +240,7 @@ def import_entries(
             resp.raise_for_status()
             stats["updated"] += 1
         except Exception as e:
-            logger.error(
-                "Failed to update #%d %s: %s", entry["rank_2024"], entry["firm_name"], e
-            )
+            logger.error("Failed to update #%d %s: %s", entry["rank_2024"], entry["firm_name"], e)
             stats["errors"] += 1
 
     # Create unmatched companies

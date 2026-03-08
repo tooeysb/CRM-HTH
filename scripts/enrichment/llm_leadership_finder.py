@@ -132,8 +132,7 @@ def find_executives(
         skip_list = f"\n\nSkip these people (already in our system): {', '.join(existing_names)}"
 
     user_prompt = (
-        f"Find the top 5-10 senior executives at {company_name} "
-        f"(website: {domain}).{skip_list}"
+        f"Find the top 5-10 senior executives at {company_name} " f"(website: {domain}).{skip_list}"
     )
 
     try:
@@ -200,11 +199,13 @@ def find_executives(
         title = exec_data.get("title", "").strip()
         if not name or not title:
             continue
-        valid.append({
-            "name": name,
-            "title": title[:255],
-            "linkedin_url": exec_data.get("linkedin_url") or None,
-        })
+        valid.append(
+            {
+                "name": name,
+                "title": title[:255],
+                "linkedin_url": exec_data.get("linkedin_url") or None,
+            }
+        )
 
     logger.info(
         "Claude found %d executives at %s (input=%d, output=%d tokens)",
@@ -389,11 +390,15 @@ def main():
     claude = Anthropic(api_key=settings.anthropic_api_key)
 
     # Load state
-    state = _load_state() if args.resume else {
-        "processed_ids": [],
-        "total_contacts_added": 0,
-        "total_errors": 0,
-    }
+    state = (
+        _load_state()
+        if args.resume
+        else {
+            "processed_ids": [],
+            "total_contacts_added": 0,
+            "total_errors": 0,
+        }
+    )
     processed_ids = set(state.get("processed_ids", []))
 
     try:
@@ -443,18 +448,14 @@ def main():
                 continue
 
             try:
-                added = process_company(
-                    company, claude, args.model, crm, dry_run=args.dry_run
-                )
+                added = process_company(company, claude, args.model, crm, dry_run=args.dry_run)
                 total_added += added
                 total_processed += 1
 
                 # Update state
                 processed_ids.add(company["id"])
                 state["processed_ids"] = list(processed_ids)
-                state["total_contacts_added"] = (
-                    state.get("total_contacts_added", 0) + added
-                )
+                state["total_contacts_added"] = state.get("total_contacts_added", 0) + added
                 _save_state(state)
 
             except Exception as e:

@@ -144,9 +144,7 @@ def main():
                 logger.info("No posts found for %s", name)
                 # Still update last_post_check_at
                 if not args.dry_run:
-                    crm.update_contact(
-                        cid, last_post_check_at=datetime.now(UTC).isoformat()
-                    )
+                    crm.update_contact(cid, last_post_check_at=datetime.now(UTC).isoformat())
                 continue
 
             # Filter posts that have a URL (needed for dedup)
@@ -154,9 +152,7 @@ def main():
             if not valid_posts:
                 logger.info("Posts found for %s but none had extractable URLs", name)
                 if not args.dry_run:
-                    crm.update_contact(
-                        cid, last_post_check_at=datetime.now(UTC).isoformat()
-                    )
+                    crm.update_contact(cid, last_post_check_at=datetime.now(UTC).isoformat())
                 continue
 
             # Save to CRM

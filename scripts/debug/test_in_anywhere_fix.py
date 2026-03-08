@@ -12,24 +12,30 @@ sys.path.insert(0, str(project_root))
 
 from sqlalchemy import create_engine, func
 from sqlalchemy.orm import Session
+
 from src.core.config import settings
+from src.integrations.gmail.client import GmailClient
 from src.models.account import GmailAccount
 from src.models.email import Email
-from src.integrations.gmail.client import GmailClient
+
 
 def main():
     engine = create_engine(settings.database_url)
 
     with Session(engine) as db:
-        account = db.query(GmailAccount).filter(
-            GmailAccount.account_email == "2e@procore.com"
-        ).first()
+        account = (
+            db.query(GmailAccount).filter(GmailAccount.account_email == "2e@procore.com").first()
+        )
 
         if not account:
             print("ERROR: Could not find account")
             return
 
-        credentials_dict = json.loads(account.credentials) if isinstance(account.credentials, str) else account.credentials
+        credentials_dict = (
+            json.loads(account.credentials)
+            if isinstance(account.credentials, str)
+            else account.credentials
+        )
         gmail_client = GmailClient(credentials=credentials_dict)
 
         # Get DB date range
@@ -70,14 +76,15 @@ def main():
             print(f"{test['name']}:")
             print(f"  Query: {test['query']}")
 
-            response = gmail_client.gmail_service.users().messages().list(
-                userId='me',
-                maxResults=10,
-                q=test['query']
-            ).execute()
+            response = (
+                gmail_client.gmail_service.users()
+                .messages()
+                .list(userId="me", maxResults=10, q=test["query"])
+                .execute()
+            )
 
-            result_count = response.get('resultSizeEstimate', 0)
-            messages = response.get('messages', [])
+            result_count = response.get("resultSizeEstimate", 0)
+            messages = response.get("messages", [])
 
             print(f"  resultSizeEstimate: {result_count:,}")
             print(f"  Actual messages returned: {len(messages)}")
@@ -86,10 +93,11 @@ def main():
             if messages:
                 missing_count = 0
                 for msg in messages[:10]:  # Check first 10
-                    exists = db.query(Email).filter(
-                        Email.gmail_message_id == msg['id'],
-                        Email.account_id == account.id
-                    ).first()
+                    exists = (
+                        db.query(Email)
+                        .filter(Email.gmail_message_id == msg["id"], Email.account_id == account.id)
+                        .first()
+                    )
                     if not exists:
                         missing_count += 1
 
@@ -115,21 +123,22 @@ def main():
         fixed_backward = f"in:anywhere before:{oldest.strftime('%Y/%m/%d')}"
 
         print(f"Missing email: {missing_id} (date: {missing_date})")
-        print(f"Labels: CATEGORY_PROMOTIONS only")
+        print("Labels: CATEGORY_PROMOTIONS only")
         print()
 
         # Test if current queries would find it
         print("Testing CURRENT queries (without in:anywhere):")
 
         for query_name, query in [("Forward", current_forward), ("Backward", current_backward)]:
-            response = gmail_client.gmail_service.users().messages().list(
-                userId='me',
-                maxResults=500,
-                q=query
-            ).execute()
+            response = (
+                gmail_client.gmail_service.users()
+                .messages()
+                .list(userId="me", maxResults=500, q=query)
+                .execute()
+            )
 
-            messages = response.get('messages', [])
-            found = any(msg['id'] == missing_id for msg in messages)
+            messages = response.get("messages", [])
+            found = any(msg["id"] == missing_id for msg in messages)
 
             print(f"  {query_name} query: {query}")
             print(f"    Found missing email? {'✓ YES' if found else '✗ NO'}")
@@ -138,14 +147,15 @@ def main():
         print("Testing FIXED queries (with in:anywhere):")
 
         for query_name, query in [("Forward", fixed_forward), ("Backward", fixed_backward)]:
-            response = gmail_client.gmail_service.users().messages().list(
-                userId='me',
-                maxResults=500,
-                q=query
-            ).execute()
+            response = (
+                gmail_client.gmail_service.users()
+                .messages()
+                .list(userId="me", maxResults=500, q=query)
+                .execute()
+            )
 
-            messages = response.get('messages', [])
-            found = any(msg['id'] == missing_id for msg in messages)
+            messages = response.get("messages", [])
+            found = any(msg["id"] == missing_id for msg in messages)
 
             print(f"  {query_name} query: {query}")
             print(f"    Found missing email? {'✓ YES' if found else '✗ NO'}")
@@ -157,6 +167,7 @@ def main():
         print()
         print("If the missing email is found with 'in:anywhere' but NOT without it,")
         print("then our fix is confirmed: add 'in:anywhere' to all date queries.")
+
 
 if __name__ == "__main__":
     main()

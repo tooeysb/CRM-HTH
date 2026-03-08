@@ -13,15 +13,17 @@ sys.path.insert(0, str(project_root))
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
+
 from src.core.config import settings
+from src.integrations.gmail.client import GmailClient
 from src.models.account import GmailAccount
 from src.models.email import Email
-from src.integrations.gmail.client import GmailClient
+
 
 def main():
     # Load missing IDs
     missing_ids_file = "/tmp/missing_email_ids.txt"
-    with open(missing_ids_file, "r") as f:
+    with open(missing_ids_file) as f:
         missing_ids = [line.strip() for line in f if line.strip()]
 
     print(f"Loading {len(missing_ids):,} missing email IDs...")
@@ -31,9 +33,9 @@ def main():
     engine = create_engine(settings.database_url)
 
     with Session(engine) as db:
-        account = db.query(GmailAccount).filter(
-            GmailAccount.account_email == "2e@procore.com"
-        ).first()
+        account = (
+            db.query(GmailAccount).filter(GmailAccount.account_email == "2e@procore.com").first()
+        )
 
         if not account:
             print("ERROR: Could not find account")
@@ -41,7 +43,11 @@ def main():
 
         user_id = account.user_id
 
-        credentials_dict = json.loads(account.credentials) if isinstance(account.credentials, str) else account.credentials
+        credentials_dict = (
+            json.loads(account.credentials)
+            if isinstance(account.credentials, str)
+            else account.credentials
+        )
         gmail_client = GmailClient(credentials=credentials_dict)
 
         print(f"Fetching {len(missing_ids):,} missing emails...")
@@ -53,7 +59,7 @@ def main():
         total_skipped = 0
 
         for i in range(0, len(missing_ids), batch_size):
-            batch = missing_ids[i:i + batch_size]
+            batch = missing_ids[i : i + batch_size]
             batch_num = (i // batch_size) + 1
             total_batches = (len(missing_ids) + batch_size - 1) // batch_size
 
@@ -88,7 +94,7 @@ def main():
                         db.flush()  # Try to insert
                         total_inserted += 1
 
-                    except Exception as e:
+                    except Exception:
                         # Duplicate or other error - skip
                         db.rollback()
                         total_skipped += 1
@@ -121,6 +127,7 @@ def main():
             print("✅ SUCCESS! All missing emails have been fetched!")
         else:
             print(f"⚠️  Still missing {87092 - final_count:,} emails")
+
 
 if __name__ == "__main__":
     main()

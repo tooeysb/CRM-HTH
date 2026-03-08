@@ -318,7 +318,7 @@ class LinkedInBrowser:
         # Fallback: simpler query without site: operator (works better on some engines)
         if not candidates:
             delay_between_clicks()
-            query = f'{company_name} LinkedIn company'
+            query = f"{company_name} LinkedIn company"
             search_fn(query)
             candidates.extend(self._extract_company_slugs_from_page())
 
@@ -464,7 +464,6 @@ class LinkedInBrowser:
             self._scroll_page()
 
             posts: list[LinkedInPostData] = []
-            content = page.content()
 
             # Try multiple selector strategies — LinkedIn changes DOM frequently
             post_selectors = [
@@ -563,9 +562,7 @@ class LinkedInBrowser:
                 if post.post_url or post.post_text:
                     posts.append(post)
 
-            logger.info(
-                "Extracted %d posts from %s", len(posts), linkedin_url
-            )
+            logger.info("Extracted %d posts from %s", len(posts), linkedin_url)
             return posts
 
         except Exception as e:

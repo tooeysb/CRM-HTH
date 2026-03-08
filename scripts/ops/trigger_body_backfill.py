@@ -12,7 +12,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from src.core.config import settings
-from src.models import GmailAccount, User
+from src.models import GmailAccount
 from src.worker.backfill_body_tasks import queue_body_backfill
 
 engine = create_engine(settings.database_url)
@@ -21,8 +21,12 @@ SessionLocal = sessionmaker(bind=engine)
 
 def main():
     parser = argparse.ArgumentParser(description="Trigger body backfill for Gmail accounts")
-    parser.add_argument("--limit", type=int, default=None, help="Max emails to backfill per account")
-    parser.add_argument("--account", type=str, default=None, help="Specific account label to backfill")
+    parser.add_argument(
+        "--limit", type=int, default=None, help="Max emails to backfill per account"
+    )
+    parser.add_argument(
+        "--account", type=str, default=None, help="Specific account label to backfill"
+    )
     args = parser.parse_args()
 
     db = SessionLocal()

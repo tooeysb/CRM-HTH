@@ -13,24 +13,30 @@ sys.path.insert(0, str(project_root))
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
+
 from src.core.config import settings
+from src.integrations.gmail.client import GmailClient
 from src.models.account import GmailAccount
 from src.models.email import Email
-from src.integrations.gmail.client import GmailClient
+
 
 def main():
     engine = create_engine(settings.database_url)
 
     with Session(engine) as db:
-        account = db.query(GmailAccount).filter(
-            GmailAccount.account_email == "2e@procore.com"
-        ).first()
+        account = (
+            db.query(GmailAccount).filter(GmailAccount.account_email == "2e@procore.com").first()
+        )
 
         if not account:
             print("ERROR: Could not find account")
             return
 
-        credentials_dict = json.loads(account.credentials) if isinstance(account.credentials, str) else account.credentials
+        credentials_dict = (
+            json.loads(account.credentials)
+            if isinstance(account.credentials, str)
+            else account.credentials
+        )
         gmail_client = GmailClient(credentials=credentials_dict)
 
         print(f"Fetching ALL message IDs from Gmail for: {account.account_email}")
@@ -45,18 +51,23 @@ def main():
 
         while True:
             page_count += 1
-            response = gmail_client.gmail_service.users().messages().list(
-                userId='me',
-                maxResults=500,
-                q='in:anywhere',  # Get EVERYTHING
-                pageToken=next_page_token if next_page_token else None
-            ).execute()
+            response = (
+                gmail_client.gmail_service.users()
+                .messages()
+                .list(
+                    userId="me",
+                    maxResults=500,
+                    q="in:anywhere",  # Get EVERYTHING
+                    pageToken=next_page_token if next_page_token else None,
+                )
+                .execute()
+            )
 
-            messages = response.get('messages', [])
+            messages = response.get("messages", [])
             for msg in messages:
-                gmail_ids.add(msg['id'])
+                gmail_ids.add(msg["id"])
 
-            next_page_token = response.get('nextPageToken')
+            next_page_token = response.get("nextPageToken")
 
             if page_count % 10 == 0:
                 print(f"  Fetched {len(gmail_ids):,} IDs so far ({page_count} pages)...")
@@ -69,9 +80,7 @@ def main():
 
         # Step 2: Get ALL message IDs from database
         print("Step 2: Fetching database message IDs...")
-        db_result = db.query(Email.gmail_message_id).filter(
-            Email.account_id == account.id
-        ).all()
+        db_result = db.query(Email.gmail_message_id).filter(Email.account_id == account.id).all()
 
         db_ids = {row[0] for row in db_result}
         print(f"✓ Total database message IDs: {len(db_ids):,}")
@@ -115,6 +124,7 @@ def main():
         else:
             print("⚠️  No missing IDs found!")
             print("This suggests the gap might be in how Gmail reports totals vs queryable emails.")
+
 
 if __name__ == "__main__":
     main()

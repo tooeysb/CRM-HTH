@@ -1693,9 +1693,7 @@ def add_contact_to_company(
         db.rollback()
         # Race condition or edge case — re-fetch existing
         existing = (
-            db.query(Contact)
-            .filter(Contact.user_id == uid, Contact.email == email_lower)
-            .first()
+            db.query(Contact).filter(Contact.user_id == uid, Contact.email == email_lower).first()
         )
         if existing:
             return {
@@ -1707,7 +1705,9 @@ def add_contact_to_company(
                 },
                 "created": False,
             }
-        raise HTTPException(status_code=409, detail="Contact with this email already exists")
+        raise HTTPException(
+            status_code=409, detail="Contact with this email already exists"
+        ) from None
     db.refresh(contact)
 
     # Link existing emails to this new contact via EmailParticipant

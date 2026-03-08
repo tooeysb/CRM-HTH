@@ -209,7 +209,7 @@ def parse_enr_pdf(pdf_path: str) -> list[dict]:
 
                 # Build sectors dict
                 sectors = {}
-                for name, pct in zip(SECTOR_NAMES, sector_pcts):
+                for name, pct in zip(SECTOR_NAMES, sector_pcts, strict=False):
                     sectors[name] = pct
 
                 entry = {
@@ -307,8 +307,9 @@ def main():
 
     # Show sector sum stats
     sums = [sum(e["sectors"].values()) for e in entries]
-    print(f"\nSector sum stats: min={min(sums)}, max={max(sums)}, "
-          f"avg={sum(sums)/len(sums):.1f}")
+    print(
+        f"\nSector sum stats: min={min(sums)}, max={max(sums)}, " f"avg={sum(sums)/len(sums):.1f}"
+    )
     exact_100 = sum(1 for s in sums if s == 100)
     print(f"Entries with sector sum exactly 100: {exact_100}/{len(entries)}")
 
@@ -316,23 +317,31 @@ def main():
     print("\n--- First 5 entries ---")
     for e in entries[:5]:
         sectors_str = ", ".join(f"{k}: {v}%" for k, v in e["sectors"].items() if v > 0)
-        print(f"  #{e['rank_2024']} ({e['rank_2023'] or 'NEW'}) "
-              f"{e['firm_name']}, {e['hq_city']}, {e['hq_state']}"
-              f"{'†' if e['has_subsidiaries'] else ''}")
-        print(f"    Rev: ${e['revenue_2023_mil']}M | "
-              f"Int'l: ${e['intl_revenue_mil']}M | "
-              f"New: {'$' + str(e['new_contracts_2023_mil']) + 'M' if e['new_contracts_2023_mil'] else 'NA'}")
+        print(
+            f"  #{e['rank_2024']} ({e['rank_2023'] or 'NEW'}) "
+            f"{e['firm_name']}, {e['hq_city']}, {e['hq_state']}"
+            f"{'†' if e['has_subsidiaries'] else ''}"
+        )
+        print(
+            f"    Rev: ${e['revenue_2023_mil']}M | "
+            f"Int'l: ${e['intl_revenue_mil']}M | "
+            f"New: {'$' + str(e['new_contracts_2023_mil']) + 'M' if e['new_contracts_2023_mil'] else 'NA'}"
+        )
         print(f"    Sectors: {sectors_str} | CM-at-Risk: {e['cm_at_risk_pct']}%")
 
     print("\n--- Last 5 entries ---")
     for e in entries[-5:]:
         sectors_str = ", ".join(f"{k}: {v}%" for k, v in e["sectors"].items() if v > 0)
-        print(f"  #{e['rank_2024']} ({e['rank_2023'] or 'NEW'}) "
-              f"{e['firm_name']}, {e['hq_city']}, {e['hq_state']}"
-              f"{'†' if e['has_subsidiaries'] else ''}")
-        print(f"    Rev: ${e['revenue_2023_mil']}M | "
-              f"Int'l: ${e['intl_revenue_mil']}M | "
-              f"New: {'$' + str(e['new_contracts_2023_mil']) + 'M' if e['new_contracts_2023_mil'] else 'NA'}")
+        print(
+            f"  #{e['rank_2024']} ({e['rank_2023'] or 'NEW'}) "
+            f"{e['firm_name']}, {e['hq_city']}, {e['hq_state']}"
+            f"{'†' if e['has_subsidiaries'] else ''}"
+        )
+        print(
+            f"    Rev: ${e['revenue_2023_mil']}M | "
+            f"Int'l: ${e['intl_revenue_mil']}M | "
+            f"New: {'$' + str(e['new_contracts_2023_mil']) + 'M' if e['new_contracts_2023_mil'] else 'NA'}"
+        )
         print(f"    Sectors: {sectors_str} | CM-at-Risk: {e['cm_at_risk_pct']}%")
 
     # Output JSON
