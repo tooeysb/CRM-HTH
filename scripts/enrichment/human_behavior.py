@@ -111,8 +111,8 @@ class WorkSchedule:
 
 
 def delay_between_profiles():
-    """Wait 60-90 seconds between profiles (~427 companies over 10 hours)."""
-    delay = random.uniform(60, 90)
+    """Wait 3-5 minutes between profiles to avoid Google rate limiting."""
+    delay = random.uniform(180, 300)
     logger.info("Waiting %.0f seconds before next profile", delay)
     time.sleep(delay)
 

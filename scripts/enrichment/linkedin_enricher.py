@@ -194,6 +194,13 @@ def _normalize_company_name(name: str) -> str:
     return name
 
 
+def _normalize_title(title: str) -> str:
+    """Normalize job title for comparison (lowercase, strip whitespace)."""
+    if not title:
+        return ""
+    return title.lower().strip()
+
+
 def recheck_contact(
     contact: ContactToEnrich,
     browser: LinkedInBrowser,
@@ -201,9 +208,9 @@ def recheck_contact(
     dry_run: bool = False,
 ) -> str:
     """
-    Re-check a contact's LinkedIn profile for job change.
+    Re-check a contact's LinkedIn profile for job/title changes.
 
-    Returns: "match", "changed", or "error".
+    Returns: "match", "company_changed", "title_changed", or "error".
     """
     logger.info(
         "Re-checking: %s (%s) — CRM company: %s",
@@ -232,32 +239,68 @@ def recheck_contact(
                 linkedin_company_raw=profile.company_name or "(no company listed)",
                 job_change_detected_at=now,
                 last_linkedin_check_at=now,
+                last_profile_check_at=now,
             )
-        return "changed"
+        return "company_changed"
 
-    if crm_company and crm_company in linkedin_company or linkedin_company in crm_company:
-        # Names overlap — still at same company
-        logger.info("Company match for %s: '%s'", contact.name, profile.company_name)
-        if not dry_run:
-            crm.update_contact(contact.id, last_linkedin_check_at=now)
-        return "match"
-
-    # Mismatch — job change detected
-    logger.info(
-        "JOB CHANGE: %s moved from '%s' to '%s'",
-        contact.name,
-        contact.company_name,
-        profile.company_name,
+    company_match = crm_company and (
+        crm_company in linkedin_company or linkedin_company in crm_company
     )
-    if not dry_run:
-        crm.update_contact(
-            contact.id,
-            is_active=False,
-            linkedin_company_raw=profile.company_name,
-            job_change_detected_at=now,
-            last_linkedin_check_at=now,
+
+    if not company_match:
+        # Mismatch — job change detected
+        logger.info(
+            "JOB CHANGE: %s moved from '%s' to '%s'",
+            contact.name,
+            contact.company_name,
+            profile.company_name,
         )
-    return "changed"
+        if not dry_run:
+            crm.update_contact(
+                contact.id,
+                is_active=False,
+                linkedin_company_raw=profile.company_name,
+                job_change_detected_at=now,
+                last_linkedin_check_at=now,
+                last_profile_check_at=now,
+            )
+        return "company_changed"
+
+    # Company matches — check for title change
+    linkedin_title = profile.title or ""
+    crm_title = getattr(contact, "title", None) or ""
+
+    update_fields = {
+        "last_linkedin_check_at": now,
+        "last_profile_check_at": now,
+    }
+
+    if linkedin_title:
+        update_fields["linkedin_title_raw"] = linkedin_title
+
+    if (
+        linkedin_title
+        and crm_title
+        and _normalize_title(linkedin_title) != _normalize_title(crm_title)
+    ):
+        logger.info(
+            "TITLE CHANGE: %s — '%s' -> '%s'",
+            contact.name,
+            crm_title,
+            linkedin_title,
+        )
+        update_fields["title_change_detected_at"] = now
+        update_fields["previous_title"] = crm_title
+
+        if not dry_run:
+            crm.update_contact(contact.id, **update_fields)
+        return "title_changed"
+
+    # Everything matches
+    logger.info("Company match for %s: '%s'", contact.name, profile.company_name)
+    if not dry_run:
+        crm.update_contact(contact.id, **update_fields)
+    return "match"
 
 
 def _update_company(crm: CRMClient, search_name: str, profile) -> None:

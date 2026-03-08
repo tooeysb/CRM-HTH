@@ -16,6 +16,7 @@ from src.models.email_participant import EmailParticipant
 from src.models.email_queue import EmailQueue
 from src.models.guardian_event import GuardianEvent
 from src.models.job import SyncJob
+from src.models.linkedin_post import LinkedInPost
 from src.models.relationship_profile import RelationshipProfile
 from src.models.user import User
 from src.models.voice_profile import VoiceProfile
@@ -34,6 +35,7 @@ __all__ = [
     "EmailTag",
     "EmailParticipant",
     "EmailQueue",
+    "LinkedInPost",
     "SyncJob",
     "GuardianEvent",
     "RelationshipProfile",

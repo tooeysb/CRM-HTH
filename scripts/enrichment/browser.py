@@ -15,6 +15,7 @@ from urllib.parse import quote_plus
 from playwright.sync_api import Browser, BrowserContext, Page, sync_playwright
 
 from scripts.enrichment.human_behavior import delay_between_clicks, delay_page_load
+from scripts.enrichment.proxy import ProxyRotator
 from src.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -43,15 +44,27 @@ class LinkedInCompanyProfile:
     description: str | None = None
 
 
+@dataclass
+class LinkedInPostData:
+    """Extracted LinkedIn post from a contact's activity feed."""
+
+    post_url: str | None = None
+    post_text: str | None = None
+    post_date_raw: str | None = None  # raw relative date: "3d", "1w"
+    post_type: str = "original"  # original, shared, article
+    engagement_count: int = 0
+
+
 class LinkedInBrowser:
     """Manages a Playwright browser session for LinkedIn browsing."""
 
-    def __init__(self, headless: bool = False):
+    def __init__(self, headless: bool = False, proxy: bool = False):
         self._playwright = None
         self._browser: Browser | None = None
         self._context: BrowserContext | None = None
         self._page: Page | None = None
         self._headless = headless
+        self._proxy = ProxyRotator() if proxy else None
 
     # ------------------------------------------------------------------
     # Setup: interactive login to save cookies
@@ -105,13 +118,20 @@ class LinkedInBrowser:
             )
 
         self._playwright = sync_playwright().start()
-        self._browser = self._playwright.chromium.launch(
-            headless=self._headless,
-            args=[
+
+        launch_kwargs = {
+            "headless": self._headless,
+            "args": [
                 "--disable-blink-features=AutomationControlled",
                 "--disable-features=IsolateOrigins,site-per-process",
             ],
-        )
+        }
+        if self._proxy and self._proxy.enabled:
+            proxy_config = self._proxy.get_playwright_proxy()
+            if proxy_config:
+                launch_kwargs["proxy"] = proxy_config
+
+        self._browser = self._playwright.chromium.launch(**launch_kwargs)
         self._context = self._browser.new_context(
             storage_state=str(AUTH_STATE_FILE),
             viewport={"width": 1440, "height": 900},
@@ -179,22 +199,19 @@ class LinkedInBrowser:
         text_lower = page_text.lower()
 
         is_captcha = (
-            # Google CAPTCHA signals
             "/sorry/" in url
             or "recaptcha" in url
-            # LinkedIn CAPTCHA / challenge signals
-            "/checkpoint/challenge" in url
+            or "/checkpoint/challenge" in url
             or "security verification" in text_lower
             or "verify you're a real person" in text_lower
             or "let's do a quick security check" in text_lower
-            # Generic signals
             or "unusual traffic" in text_lower
             or "captcha" in text_lower
             or "are you a robot" in text_lower
         )
 
         if is_captcha:
-            wait_minutes = random.uniform(5, 10)
+            wait_minutes = random.uniform(15, 20)
             logger.warning(
                 "CAPTCHA detected at %s — backing off for %.1f minutes", url, wait_minutes
             )
@@ -203,12 +220,36 @@ class LinkedInBrowser:
         return False
 
     # ------------------------------------------------------------------
-    # Google search
+    # Web search helpers
     # ------------------------------------------------------------------
+
+    def _web_search(self, query: str) -> str:
+        """Execute a DuckDuckGo search and return page HTML content."""
+        page = self._page
+        url = f"https://duckduckgo.com/?q={quote_plus(query)}"
+        page.goto(url, wait_until="domcontentloaded")
+        delay_page_load()
+        if self._check_and_handle_captcha():
+            page.goto(url, wait_until="domcontentloaded")
+            delay_page_load()
+        self._scroll_page()
+        return page.content()
+
+    def _google_search(self, query: str) -> str:
+        """Execute a Google search and return page HTML content."""
+        page = self._page
+        url = f"https://www.google.com/search?q={quote_plus(query)}"
+        page.goto(url, wait_until="domcontentloaded")
+        delay_page_load()
+        if self._check_and_handle_captcha():
+            page.goto(url, wait_until="domcontentloaded")
+            delay_page_load()
+        self._scroll_page()
+        return page.content()
 
     def search_google_for_linkedin(self, name: str, company: str | None) -> str | None:
         """
-        Search Google for a person's LinkedIn profile.
+        Search DuckDuckGo for a person's LinkedIn profile.
 
         Returns the first linkedin.com/in/ URL found, or None.
         """
@@ -218,27 +259,17 @@ class LinkedInBrowser:
         parts.append("LinkedIn")
         query = " ".join(parts)
 
-        page = self._page
-        page.goto(f"https://www.google.com/search?q={quote_plus(query)}", wait_until="domcontentloaded")
-        delay_page_load()
-        if self._check_and_handle_captcha():
-            # Retry the search after CAPTCHA backoff
-            page.goto(f"https://www.google.com/search?q={quote_plus(query)}", wait_until="domcontentloaded")
-            delay_page_load()
-        self._scroll_page()
+        content = self._web_search(query)
 
         # Extract LinkedIn profile URLs from search results
-        content = page.content()
-        # Match linkedin.com/in/ URLs in href attributes or text
         matches = re.findall(r"https?://(?:www\.)?linkedin\.com/in/([a-zA-Z0-9_-]+)", content)
         if matches:
-            # Deduplicate, take first unique slug
             seen = []
             for slug in matches:
                 if slug not in seen:
                     seen.append(slug)
             linkedin_url = f"https://www.linkedin.com/in/{seen[0]}"
-            logger.info("Found LinkedIn URL via Google: %s", linkedin_url)
+            logger.info("Found LinkedIn URL: %s", linkedin_url)
             return linkedin_url
 
         logger.warning("No LinkedIn profile found for: %s", query)
@@ -249,52 +280,47 @@ class LinkedInBrowser:
     # ------------------------------------------------------------------
 
     def search_google_for_company_linkedin(
-        self, company_name: str, domain: str | None = None
+        self,
+        company_name: str,
+        domain: str | None = None,
+        engine: str = "duckduckgo",
     ) -> list[str]:
         """
-        Search Google for a company's LinkedIn page.
+        Search for a company's LinkedIn page.
 
-        Returns up to 3 candidate linkedin.com/company/ URLs.
-        Tries name-based search first, then domain-based fallback.
+        Args:
+            engine: "duckduckgo" (default) or "google"
+
+        Returns up to 5 candidate linkedin.com/company/ URLs.
+        Tries site: operator first, then falls back to simpler "Company LinkedIn" query.
         """
-        page = self._page
+        search_fn = self._google_search if engine == "google" else self._web_search
         candidates: list[str] = []
 
-        # Primary search: company name
+        # Primary search: company name with site: operator
         query = f'"{company_name}" site:linkedin.com/company/'
-        page.goto(f"https://www.google.com/search?q={quote_plus(query)}", wait_until="domcontentloaded")
-        delay_page_load()
-        if self._check_and_handle_captcha():
-            page.goto(f"https://www.google.com/search?q={quote_plus(query)}", wait_until="domcontentloaded")
-            delay_page_load()
-        self._scroll_page()
-
+        search_fn(query)
         candidates.extend(self._extract_company_slugs_from_page())
 
         # Domain-based search — always run when domain is available
-        # Critical for companies with tricky names (e.g., "Adolfson & Peterson" with a-p.com)
-        if domain:
+        if domain and len(candidates) < 5:
             delay_between_clicks()
             domains = [d.strip() for d in domain.split(",") if d.strip()]
             for d in domains[:2]:
                 query = f'"{d}" site:linkedin.com/company/'
-                page.goto(
-                    f"https://www.google.com/search?q={quote_plus(query)}",
-                    wait_until="domcontentloaded",
-                )
-                delay_page_load()
-                if self._check_and_handle_captcha():
-                    page.goto(
-                        f"https://www.google.com/search?q={quote_plus(query)}",
-                        wait_until="domcontentloaded",
-                    )
-                    delay_page_load()
-                self._scroll_page()
+                search_fn(query)
                 for url in self._extract_company_slugs_from_page():
                     if url not in candidates:
                         candidates.append(url)
                 if len(candidates) >= 5:
                     break
+
+        # Fallback: simpler query without site: operator (works better on some engines)
+        if not candidates:
+            delay_between_clicks()
+            query = f'{company_name} LinkedIn company'
+            search_fn(query)
+            candidates.extend(self._extract_company_slugs_from_page())
 
         if candidates:
             logger.info(
@@ -400,6 +426,175 @@ class LinkedInBrowser:
             logger.error("Error extracting company profile from %s: %s", company_url, e)
 
         return result
+
+    # ------------------------------------------------------------------
+    # LinkedIn activity/post extraction
+    # ------------------------------------------------------------------
+
+    def extract_recent_activity(
+        self, linkedin_url: str, max_posts: int = 5
+    ) -> list[LinkedInPostData]:
+        """Navigate to a contact's recent activity page and extract posts.
+
+        Args:
+            linkedin_url: The contact's LinkedIn profile URL (e.g., https://www.linkedin.com/in/johndoe)
+            max_posts: Maximum number of posts to extract.
+
+        Returns:
+            List of LinkedInPostData with extracted post info.
+        """
+        page = self._page
+        activity_url = linkedin_url.rstrip("/") + "/recent-activity/all/"
+
+        try:
+            page.goto(activity_url, wait_until="domcontentloaded", timeout=15000)
+            delay_page_load()
+
+            if self._check_and_handle_captcha():
+                page.goto(activity_url, wait_until="domcontentloaded", timeout=15000)
+                delay_page_load()
+
+            if self._is_login_page():
+                logger.error("LinkedIn session expired — cannot extract activity")
+                return []
+
+            # Scroll to load more posts
+            self._scroll_page()
+            delay_between_clicks()
+            self._scroll_page()
+
+            posts: list[LinkedInPostData] = []
+            content = page.content()
+
+            # Try multiple selector strategies — LinkedIn changes DOM frequently
+            post_selectors = [
+                "div.feed-shared-update-v2",
+                "div[data-urn*='activity']",
+                "div.occludable-update",
+                "article.feed-shared-update",
+            ]
+
+            post_elements = []
+            for selector in post_selectors:
+                post_elements = page.query_selector_all(selector)
+                if post_elements:
+                    break
+
+            if not post_elements:
+                # Fallback: try to detect "no activity" state
+                page_text = ""
+                try:
+                    page_text = page.inner_text("body")
+                except Exception:
+                    pass
+                if "hasn't posted" in page_text.lower() or "no activity" in page_text.lower():
+                    logger.info("No activity found for %s", linkedin_url)
+                else:
+                    logger.warning(
+                        "Could not find post elements for %s — DOM may have changed", linkedin_url
+                    )
+                return []
+
+            for elem in post_elements[:max_posts]:
+                post = LinkedInPostData()
+
+                # Extract post text (multiple selector fallbacks)
+                for text_sel in [
+                    ".feed-shared-text",
+                    ".update-components-text",
+                    ".feed-shared-inline-show-more-text",
+                    "span[dir='ltr']",
+                ]:
+                    text_el = elem.query_selector(text_sel)
+                    if text_el:
+                        raw_text = text_el.inner_text().strip()
+                        if raw_text:
+                            post.post_text = raw_text[:2000]
+                            break
+
+                # Extract post URL from permalink/share link
+                for link_sel in [
+                    "a[href*='/feed/update/']",
+                    "a[href*='activity-']",
+                    ".feed-shared-actor__sub-description a",
+                ]:
+                    link_el = elem.query_selector(link_sel)
+                    if link_el:
+                        href = link_el.get_attribute("href")
+                        if href:
+                            post.post_url = href.split("?")[0]
+                            if not post.post_url.startswith("http"):
+                                post.post_url = "https://www.linkedin.com" + post.post_url
+                            break
+
+                # Extract relative date
+                for time_sel in [
+                    "time",
+                    ".update-components-actor__sub-description",
+                    "span.feed-shared-actor__sub-description",
+                ]:
+                    time_el = elem.query_selector(time_sel)
+                    if time_el:
+                        raw = time_el.inner_text().strip()
+                        if raw and any(c.isdigit() for c in raw):
+                            post.post_date_raw = raw
+                            break
+
+                # Detect post type
+                if elem.query_selector(
+                    ".feed-shared-reshared-update, .update-components-mini-update-v2"
+                ):
+                    post.post_type = "shared"
+                elif elem.query_selector(".feed-shared-article, .update-components-article"):
+                    post.post_type = "article"
+
+                # Extract engagement count
+                for social_sel in [
+                    ".social-details-social-counts",
+                    ".social-details-social-activity",
+                ]:
+                    social_el = elem.query_selector(social_sel)
+                    if social_el:
+                        social_text = social_el.inner_text()
+                        numbers = re.findall(r"(\d+)", social_text)
+                        post.engagement_count = sum(int(n) for n in numbers)
+                        break
+
+                if post.post_url or post.post_text:
+                    posts.append(post)
+
+            logger.info(
+                "Extracted %d posts from %s", len(posts), linkedin_url
+            )
+            return posts
+
+        except Exception as e:
+            logger.error("Error extracting activity from %s: %s", linkedin_url, e)
+            return []
+
+    @staticmethod
+    def parse_relative_date(text: str) -> int | None:
+        """Parse LinkedIn relative date string to days ago.
+
+        Examples: "3d" -> 3, "1w" -> 7, "2mo" -> 60, "1yr" -> 365
+        Returns None if unparseable.
+        """
+        import re as _re
+
+        patterns = [
+            (r"(\d+)\s*m(?:in)?(?:ute)?s?\b", lambda m: 0),  # minutes -> 0 days
+            (r"(\d+)\s*h(?:r|our)?s?\b", lambda m: 0),  # hours -> 0 days
+            (r"(\d+)\s*d(?:ay)?s?\b", lambda m: int(m)),
+            (r"(\d+)\s*w(?:eek|k)?s?\b", lambda m: int(m) * 7),
+            (r"(\d+)\s*mo(?:nth)?s?\b", lambda m: int(m) * 30),
+            (r"(\d+)\s*y(?:r|ear)?s?\b", lambda m: int(m) * 365),
+        ]
+        text = text.lower().strip()
+        for pattern, calc in patterns:
+            match = _re.search(pattern, text)
+            if match:
+                return calc(match.group(1))
+        return None
 
     # ------------------------------------------------------------------
     # Personal profile extraction

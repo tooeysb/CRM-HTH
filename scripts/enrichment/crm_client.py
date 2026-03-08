@@ -25,9 +25,10 @@ class ContactToEnrich:
     company_name: str | None
     linkedin_url: str | None
     email_count: int
+    title: str | None = None
 
     @classmethod
-    def from_dict(cls, data: dict) -> "ContactToEnrich":
+    def from_dict(cls, data: dict) -> ContactToEnrich:
         """Create from API response dict, ignoring extra fields."""
         known = {f.name for f in fields(cls)}
         return cls(**{k: v for k, v in data.items() if k in known})
@@ -105,6 +106,35 @@ class CRMClient:
         if title:
             body["title"] = title
         resp = self._client.post(f"/crm/api/companies/{company_id}/contacts", json=body)
+        resp.raise_for_status()
+        return resp.json()
+
+    # LinkedIn monitoring endpoints
+
+    def get_needs_post_check(self, tier: str | None = None) -> list[dict]:
+        """Contacts due for LinkedIn activity scraping based on tier schedule."""
+        params = {}
+        if tier:
+            params["tier"] = tier
+        resp = self._client.get("/crm/api/reports/needs-post-check", params=params)
+        resp.raise_for_status()
+        return resp.json()["items"]
+
+    def get_needs_profile_check(self, tier: str | None = None) -> list[dict]:
+        """Contacts due for LinkedIn profile check (job/title changes)."""
+        params = {}
+        if tier:
+            params["tier"] = tier
+        resp = self._client.get("/crm/api/reports/needs-profile-check", params=params)
+        resp.raise_for_status()
+        return resp.json()["items"]
+
+    def create_linkedin_posts(self, contact_id: str, posts: list[dict]) -> dict:
+        """POST /crm/api/contacts/{id}/linkedin-posts — batch create posts."""
+        resp = self._client.post(
+            f"/crm/api/contacts/{contact_id}/linkedin-posts",
+            json={"posts": posts},
+        )
         resp.raise_for_status()
         return resp.json()
 

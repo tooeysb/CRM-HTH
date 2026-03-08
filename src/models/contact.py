@@ -5,7 +5,17 @@ Contact model with multi-account merging support.
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import ARRAY, Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    ARRAY,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.dialects.postgresql import JSON, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -15,6 +25,7 @@ if TYPE_CHECKING:
     from src.models.company import Company
     from src.models.contact_enrichment import ContactEnrichment
     from src.models.email_participant import EmailParticipant
+    from src.models.linkedin_post import LinkedInPost
     from src.models.user import User
 
 
@@ -177,6 +188,50 @@ class Contact(Base, UUIDMixin, TimestampMixin):
         comment="Previous company before reassignment after job change",
     )
 
+    # LinkedIn Monitoring
+    monitoring_tier: Mapped[str | None] = mapped_column(
+        String(1), nullable=True, index=True, comment="A/B/C monitoring tier"
+    )
+
+    tier_auto_suggested: Mapped[str | None] = mapped_column(
+        String(1), nullable=True, comment="Auto-computed tier suggestion from email data"
+    )
+
+    tier_manually_set: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        server_default=text("false"),
+        nullable=False,
+        comment="Whether user overrode auto-suggested tier",
+    )
+
+    last_post_check_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="When LinkedIn posts were last scraped for this contact",
+    )
+
+    last_profile_check_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="When LinkedIn profile was last checked for job/title changes",
+    )
+
+    # Title Change Tracking
+    linkedin_title_raw: Mapped[str | None] = mapped_column(
+        String(500), nullable=True, comment="Job title as seen on LinkedIn during last check"
+    )
+
+    title_change_detected_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="When a title mismatch was detected on LinkedIn",
+    )
+
+    previous_title: Mapped[str | None] = mapped_column(
+        String(255), nullable=True, comment="Job title before most recent change was detected"
+    )
+
     # Relationships
     user: Mapped["User"] = relationship("User", back_populates="contacts")
 
@@ -194,6 +249,10 @@ class Contact(Base, UUIDMixin, TimestampMixin):
 
     email_participants: Mapped[list["EmailParticipant"]] = relationship(
         "EmailParticipant", back_populates="contact"
+    )
+
+    linkedin_posts: Mapped[list["LinkedInPost"]] = relationship(
+        "LinkedInPost", back_populates="contact"
     )
 
     def __repr__(self) -> str:

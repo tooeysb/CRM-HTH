@@ -11,7 +11,7 @@ import httpx
 from bs4 import BeautifulSoup
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import case, func, or_, text
+from sqlalchemy import and_, case, func, or_, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
@@ -24,6 +24,7 @@ from src.models.contact import Contact
 from src.models.discovered_contact import DiscoveredContact
 from src.models.email import Email
 from src.models.email_participant import EmailParticipant
+from src.models.linkedin_post import LinkedInPost
 from src.models.relationship_profile import RelationshipProfile
 from src.models.user import User
 from src.services.enrichment.email_participant_builder import EmailParticipantBuilder
@@ -153,6 +154,14 @@ class ContactUpdateRequest(BaseModel):
     last_linkedin_check_at: str | None = None
     previous_company_id: str | None = None
     is_approved: bool | None = None
+    monitoring_tier: str | None = None
+    tier_auto_suggested: str | None = None
+    tier_manually_set: bool | None = None
+    last_post_check_at: str | None = None
+    last_profile_check_at: str | None = None
+    linkedin_title_raw: str | None = None
+    title_change_detected_at: str | None = None
+    previous_title: str | None = None
 
 
 class CompanyUpdateRequest(BaseModel):
@@ -249,6 +258,14 @@ def _serialize_contact(contact: Contact, company_name: str | None = None) -> dic
         "linkedin_company_raw": contact.linkedin_company_raw,
         "job_change_detected_at": serialize_dt(contact.job_change_detected_at),
         "last_linkedin_check_at": serialize_dt(contact.last_linkedin_check_at),
+        "monitoring_tier": contact.monitoring_tier,
+        "tier_auto_suggested": contact.tier_auto_suggested,
+        "tier_manually_set": contact.tier_manually_set,
+        "linkedin_title_raw": contact.linkedin_title_raw,
+        "title_change_detected_at": serialize_dt(contact.title_change_detected_at),
+        "previous_title": contact.previous_title,
+        "last_post_check_at": serialize_dt(contact.last_post_check_at),
+        "last_profile_check_at": serialize_dt(contact.last_profile_check_at),
         "created_at": serialize_dt(contact.created_at),
         "updated_at": serialize_dt(contact.updated_at),
     }
@@ -2487,4 +2504,496 @@ def merge_company(
             "news_duplicates_removed": news_dupes,
             "enrichments": enrichments_moved,
         },
+    }
+
+
+# ---------------------------------------------------------------------------
+# LinkedIn Monitoring: Tier management
+# ---------------------------------------------------------------------------
+
+
+class MonitoringTierRequest(BaseModel):
+    tier: str | None = None  # A, B, C, or null to clear
+
+
+class BulkTierRequest(BaseModel):
+    contact_ids: list[str]
+    tier: str | None = None
+
+
+@router.post("/contacts/{contact_id}/monitoring-tier")
+def set_monitoring_tier(
+    contact_id: str,
+    body: MonitoringTierRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_sync_db),
+):
+    """Set a contact's monitoring tier (manual override)."""
+    uid = user.id
+    contact = (
+        db.query(Contact)
+        .filter(Contact.id == contact_id, Contact.user_id == uid, Contact.deleted_at.is_(None))
+        .first()
+    )
+    if not contact:
+        raise HTTPException(status_code=404, detail="Contact not found")
+
+    if body.tier is not None and body.tier not in ("A", "B", "C"):
+        raise HTTPException(status_code=400, detail="Tier must be A, B, C, or null")
+
+    if body.tier is None:
+        # Revert to auto-suggested tier
+        contact.monitoring_tier = contact.tier_auto_suggested
+        contact.tier_manually_set = False
+    else:
+        contact.monitoring_tier = body.tier
+        contact.tier_manually_set = True
+
+    db.commit()
+    return {
+        "status": "ok",
+        "monitoring_tier": contact.monitoring_tier,
+        "tier_manually_set": contact.tier_manually_set,
+    }
+
+
+@router.post("/contacts/bulk-tier")
+def set_bulk_monitoring_tier(
+    body: BulkTierRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_sync_db),
+):
+    """Bulk-set monitoring tier for multiple contacts."""
+    uid = user.id
+    if len(body.contact_ids) > 100:
+        raise HTTPException(status_code=400, detail="Maximum 100 contacts per request")
+
+    if body.tier is not None and body.tier not in ("A", "B", "C"):
+        raise HTTPException(status_code=400, detail="Tier must be A, B, C, or null")
+
+    updated = (
+        db.query(Contact)
+        .filter(
+            Contact.user_id == uid,
+            Contact.deleted_at.is_(None),
+            Contact.id.in_(body.contact_ids),
+        )
+        .update(
+            {
+                Contact.monitoring_tier: body.tier,
+                Contact.tier_manually_set: body.tier is not None,
+            },
+            synchronize_session="fetch",
+        )
+    )
+    db.commit()
+    return {"status": "ok", "updated": updated}
+
+
+# ---------------------------------------------------------------------------
+# LinkedIn Monitoring: Post management
+# ---------------------------------------------------------------------------
+
+
+class LinkedInPostCreate(BaseModel):
+    post_url: str
+    post_text: str | None = None
+    post_date: str | None = None
+    post_type: str | None = None
+    engagement_count: int = 0
+
+
+class LinkedInPostBatchCreate(BaseModel):
+    posts: list[LinkedInPostCreate]
+
+
+@router.post("/contacts/{contact_id}/linkedin-posts")
+def create_linkedin_posts(
+    contact_id: str,
+    body: LinkedInPostBatchCreate,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_sync_db),
+):
+    """Bulk-create LinkedIn posts for a contact (used by scraper)."""
+    uid = user.id
+    contact = (
+        db.query(Contact)
+        .filter(Contact.id == contact_id, Contact.user_id == uid, Contact.deleted_at.is_(None))
+        .first()
+    )
+    if not contact:
+        raise HTTPException(status_code=404, detail="Contact not found")
+
+    created = 0
+    duplicates = 0
+    now = datetime.utcnow()
+
+    for post_data in body.posts:
+        # Check for existing post by URL
+        existing = (
+            db.query(LinkedInPost.id).filter(LinkedInPost.post_url == post_data.post_url).first()
+        )
+        if existing:
+            duplicates += 1
+            continue
+
+        post = LinkedInPost(
+            contact_id=uuid.UUID(contact_id),
+            post_url=post_data.post_url,
+            post_text=post_data.post_text[:2000] if post_data.post_text else None,
+            post_date=datetime.fromisoformat(post_data.post_date) if post_data.post_date else None,
+            post_type=post_data.post_type,
+            engagement_count=post_data.engagement_count,
+            scraped_at=now,
+            is_new=True,
+        )
+        db.add(post)
+        created += 1
+
+    # Update last_post_check_at
+    contact.last_post_check_at = now
+    db.commit()
+
+    return {"created": created, "duplicates": duplicates}
+
+
+@router.post("/linkedin-posts/{post_id}/mark-seen")
+def mark_post_seen(
+    post_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_sync_db),
+):
+    """Mark a LinkedIn post as seen (clear is_new flag)."""
+    uid = user.id
+    post = (
+        db.query(LinkedInPost)
+        .join(Contact)
+        .filter(LinkedInPost.id == post_id, Contact.user_id == uid)
+        .first()
+    )
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found")
+
+    post.is_new = False
+    db.commit()
+    return {"status": "ok"}
+
+
+@router.post("/linkedin-posts/mark-all-seen")
+def mark_all_posts_seen(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_sync_db),
+):
+    """Mark all LinkedIn posts as seen."""
+    uid = user.id
+    marked = (
+        db.query(LinkedInPost)
+        .join(Contact)
+        .filter(Contact.user_id == uid, LinkedInPost.is_new.is_(True))
+        .update({LinkedInPost.is_new: False}, synchronize_session="fetch")
+    )
+    db.commit()
+    return {"marked": marked}
+
+
+# ---------------------------------------------------------------------------
+# LinkedIn Monitoring: Reports
+# ---------------------------------------------------------------------------
+
+
+@router.get("/reports/new-linkedin-posts")
+def report_new_linkedin_posts(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_sync_db),
+):
+    """LinkedIn posts that haven't been seen yet."""
+    uid = user.id
+
+    posts = (
+        db.query(LinkedInPost)
+        .join(Contact)
+        .options(selectinload(LinkedInPost.contact).selectinload(Contact.company))
+        .filter(Contact.user_id == uid, LinkedInPost.is_new.is_(True))
+        .order_by(LinkedInPost.post_date.desc().nullslast())
+        .limit(200)
+        .all()
+    )
+
+    results = [
+        {
+            "id": str(p.id),
+            "contact_id": str(p.contact_id),
+            "contact_name": p.contact.name,
+            "contact_email": p.contact.email,
+            "company_name": p.contact.company.name if p.contact.company else None,
+            "post_url": p.post_url,
+            "post_text": p.post_text,
+            "post_date": serialize_dt(p.post_date),
+            "post_type": p.post_type,
+            "engagement_count": p.engagement_count,
+            "scraped_at": serialize_dt(p.scraped_at),
+        }
+        for p in posts
+    ]
+
+    return {"items": results, "total": len(results)}
+
+
+@router.get("/reports/title-changes")
+def report_title_changes(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_sync_db),
+):
+    """Contacts where a LinkedIn title change was detected."""
+    uid = user.id
+
+    contacts = (
+        db.query(Contact)
+        .options(selectinload(Contact.company))
+        .filter(
+            Contact.user_id == uid,
+            Contact.deleted_at.is_(None),
+            Contact.title_change_detected_at.isnot(None),
+        )
+        .order_by(Contact.title_change_detected_at.desc())
+        .limit(200)
+        .all()
+    )
+
+    results = [
+        {
+            "id": str(c.id),
+            "name": c.name,
+            "email": c.email,
+            "company_name": c.company.name if c.company else None,
+            "previous_title": c.previous_title,
+            "current_title": c.title,
+            "linkedin_title_raw": c.linkedin_title_raw,
+            "linkedin_url": c.linkedin_url,
+            "title_change_detected_at": serialize_dt(c.title_change_detected_at),
+        }
+        for c in contacts
+    ]
+
+    return {"items": results, "total": len(results)}
+
+
+@router.get("/reports/needs-post-check")
+def report_needs_post_check(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_sync_db),
+    tier: str | None = Query(None),
+):
+    """Contacts due for LinkedIn post scraping based on tier schedule."""
+    from datetime import timedelta
+
+    uid = user.id
+    now = datetime.utcnow()
+
+    tier_thresholds = {
+        "A": now - timedelta(days=3, hours=12),
+        "B": now - timedelta(days=7),
+        "C": now - timedelta(days=30),
+    }
+
+    query = db.query(Contact).filter(
+        Contact.user_id == uid,
+        Contact.deleted_at.is_(None),
+        Contact.is_active.is_(True),
+        Contact.linkedin_url.isnot(None),
+        Contact.monitoring_tier.isnot(None),
+    )
+
+    if tier and tier in tier_thresholds:
+        threshold = tier_thresholds[tier]
+        query = query.filter(
+            Contact.monitoring_tier == tier,
+            or_(
+                Contact.last_post_check_at.is_(None),
+                Contact.last_post_check_at < threshold,
+            ),
+        )
+    else:
+        conditions = []
+        for t, threshold in tier_thresholds.items():
+            conditions.append(
+                and_(
+                    Contact.monitoring_tier == t,
+                    or_(
+                        Contact.last_post_check_at.is_(None),
+                        Contact.last_post_check_at < threshold,
+                    ),
+                )
+            )
+        query = query.filter(or_(*conditions))
+
+    contacts = (
+        query.options(selectinload(Contact.company))
+        .order_by(Contact.last_post_check_at.asc().nullsfirst())
+        .limit(500)
+        .all()
+    )
+
+    results = [
+        {
+            "id": str(c.id),
+            "name": c.name,
+            "email": c.email,
+            "company_name": c.company.name if c.company else None,
+            "linkedin_url": c.linkedin_url,
+            "monitoring_tier": c.monitoring_tier,
+            "last_post_check_at": serialize_dt(c.last_post_check_at),
+        }
+        for c in contacts
+    ]
+
+    return {"items": results, "total": len(results)}
+
+
+@router.get("/reports/needs-profile-check")
+def report_needs_profile_check(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_sync_db),
+    tier: str | None = Query(None),
+):
+    """Contacts due for LinkedIn profile check (job/title changes) based on tier."""
+    from datetime import timedelta
+
+    uid = user.id
+    now = datetime.utcnow()
+
+    tier_thresholds = {
+        "A": now - timedelta(days=14),
+        "B": now - timedelta(days=30),
+        "C": now - timedelta(days=90),
+    }
+
+    query = db.query(Contact).filter(
+        Contact.user_id == uid,
+        Contact.deleted_at.is_(None),
+        Contact.is_active.is_(True),
+        Contact.linkedin_url.isnot(None),
+        Contact.monitoring_tier.isnot(None),
+    )
+
+    if tier and tier in tier_thresholds:
+        threshold = tier_thresholds[tier]
+        query = query.filter(
+            Contact.monitoring_tier == tier,
+            or_(
+                Contact.last_profile_check_at.is_(None),
+                Contact.last_profile_check_at < threshold,
+            ),
+        )
+    else:
+        conditions = []
+        for t, threshold in tier_thresholds.items():
+            conditions.append(
+                and_(
+                    Contact.monitoring_tier == t,
+                    or_(
+                        Contact.last_profile_check_at.is_(None),
+                        Contact.last_profile_check_at < threshold,
+                    ),
+                )
+            )
+        query = query.filter(or_(*conditions))
+
+    contacts = (
+        query.options(selectinload(Contact.company))
+        .order_by(Contact.last_profile_check_at.asc().nullsfirst())
+        .limit(500)
+        .all()
+    )
+
+    results = [
+        {
+            "id": str(c.id),
+            "name": c.name,
+            "email": c.email,
+            "company_name": c.company.name if c.company else None,
+            "linkedin_url": c.linkedin_url,
+            "monitoring_tier": c.monitoring_tier,
+            "last_profile_check_at": serialize_dt(c.last_profile_check_at),
+        }
+        for c in contacts
+    ]
+
+    return {"items": results, "total": len(results)}
+
+
+@router.get("/reports/contact-activity-summary")
+def report_activity_summary(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_sync_db),
+):
+    """Summary stats for the LinkedIn monitoring dashboard."""
+    from datetime import timedelta
+
+    uid = user.id
+    now = datetime.utcnow()
+
+    # New posts count
+    new_posts = (
+        db.query(func.count(LinkedInPost.id))
+        .join(Contact)
+        .filter(Contact.user_id == uid, LinkedInPost.is_new.is_(True))
+        .scalar()
+    )
+
+    # Job changes in last 7 days
+    job_changes_7d = (
+        db.query(func.count(Contact.id))
+        .filter(
+            Contact.user_id == uid,
+            Contact.deleted_at.is_(None),
+            Contact.job_change_detected_at >= now - timedelta(days=7),
+        )
+        .scalar()
+    )
+
+    # Title changes in last 7 days
+    title_changes_7d = (
+        db.query(func.count(Contact.id))
+        .filter(
+            Contact.user_id == uid,
+            Contact.deleted_at.is_(None),
+            Contact.title_change_detected_at >= now - timedelta(days=7),
+        )
+        .scalar()
+    )
+
+    # Tier distribution
+    tier_rows = (
+        db.query(Contact.monitoring_tier, func.count(Contact.id))
+        .filter(
+            Contact.user_id == uid,
+            Contact.deleted_at.is_(None),
+            Contact.monitoring_tier.isnot(None),
+        )
+        .group_by(Contact.monitoring_tier)
+        .all()
+    )
+    tier_counts = {row[0]: row[1] for row in tier_rows}
+
+    # Count untiered contacts with LinkedIn URL
+    untiered = (
+        db.query(func.count(Contact.id))
+        .filter(
+            Contact.user_id == uid,
+            Contact.deleted_at.is_(None),
+            Contact.linkedin_url.isnot(None),
+            Contact.monitoring_tier.is_(None),
+        )
+        .scalar()
+    )
+
+    return {
+        "new_posts": new_posts,
+        "job_changes_7d": job_changes_7d,
+        "title_changes_7d": title_changes_7d,
+        "tier_a": tier_counts.get("A", 0),
+        "tier_b": tier_counts.get("B", 0),
+        "tier_c": tier_counts.get("C", 0),
+        "untiered": untiered,
     }

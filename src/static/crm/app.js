@@ -39,6 +39,18 @@ function crmApp() {
             filters: { company_type: '', account_tier: '', enr: '', contact_status: 'contacted' },
         },
 
+        // LinkedIn
+        linkedin: {
+            loading: true,
+            tab: 'posts',
+            posts: [],
+            postsTotal: 0,
+            jobChanges: [],
+            titleChanges: [],
+            summary: null,
+            tiers: { loading: false },
+        },
+
         // Outreach
         outreach: {
             loading: true,
@@ -102,6 +114,10 @@ function crmApp() {
             this._restoreFromHash();
             this.$watch('reports.selected', (val) => localStorage.setItem('crm_report_tab', val));
             this.$watch('admin.selected', (val) => localStorage.setItem('crm_admin_tab', val));
+            // Fetch LinkedIn post count for nav badge
+            this.apiFetch('reports/contact-activity-summary').then(data => {
+                if (data) this.linkedin.postsTotal = data.new_posts || 0;
+            });
         },
 
         // ==================== NAVIGATION ====================
@@ -117,6 +133,8 @@ function crmApp() {
                 this.loadCompanies();
             } else if (view === 'outreach') {
                 this.loadOutreach();
+            } else if (view === 'linkedin') {
+                this.loadLinkedIn();
             } else if (view === 'admin') {
                 if (this.admin.selected === 'reports') this.loadReports();
             }
@@ -145,12 +163,13 @@ function crmApp() {
                 this.loadReports();
                 return;
             }
-            if (['dashboard', 'contacts', 'companies', 'outreach', 'admin'].includes(view)) {
+            if (['dashboard', 'contacts', 'companies', 'outreach', 'linkedin', 'admin'].includes(view)) {
                 this.currentView = view;
                 if (view === 'dashboard') this.loadDashboard();
                 else if (view === 'contacts') this.loadContacts();
                 else if (view === 'companies') this.loadCompanies();
                 else if (view === 'outreach') this.loadOutreach();
+                else if (view === 'linkedin') this.loadLinkedIn();
                 else if (view === 'admin') { this.loadReports(); }
 
                 if (id) {
@@ -798,6 +817,57 @@ function crmApp() {
         },
 
         // ==================== REPORTS ====================
+        // ==================== LINKEDIN ====================
+        async loadLinkedIn() {
+            this.linkedin.loading = true;
+            const [posts, jobChanges, titleChanges, summary] = await Promise.all([
+                this.apiFetch('reports/new-linkedin-posts'),
+                this.apiFetch('reports/job-changes'),
+                this.apiFetch('reports/title-changes'),
+                this.apiFetch('reports/contact-activity-summary'),
+            ]);
+            if (posts) this.linkedin.posts = posts.items || [];
+            if (posts) this.linkedin.postsTotal = posts.total || 0;
+            if (jobChanges) this.linkedin.jobChanges = jobChanges.items || [];
+            if (titleChanges) this.linkedin.titleChanges = titleChanges.items || [];
+            if (summary) this.linkedin.summary = summary;
+            this.linkedin.loading = false;
+        },
+
+        async markPostSeen(postId) {
+            await this.apiFetch('linkedin-posts/' + postId + '/mark-seen', { method: 'POST' });
+            this.linkedin.posts = this.linkedin.posts.filter(p => p.id !== postId);
+            this.linkedin.postsTotal = Math.max(0, this.linkedin.postsTotal - 1);
+        },
+
+        async markAllPostsSeen() {
+            await this.apiFetch('linkedin-posts/mark-all-seen', { method: 'POST' });
+            this.linkedin.posts = [];
+            this.linkedin.postsTotal = 0;
+        },
+
+        async setContactTier(contactId, tier) {
+            await this.apiFetch('contacts/' + contactId + '/monitoring-tier', {
+                method: 'POST',
+                body: JSON.stringify({ tier }),
+            });
+        },
+
+        truncateText(text, maxLen) {
+            if (!text) return '';
+            if (text.length <= maxLen) return text;
+            return text.substring(0, maxLen) + '...';
+        },
+
+        tierBadgeClass(tier) {
+            const map = {
+                'A': 'bg-green-100 text-green-700',
+                'B': 'bg-blue-100 text-blue-700',
+                'C': 'bg-gray-100 text-gray-600',
+            };
+            return map[tier] || 'bg-gray-50 text-gray-400';
+        },
+
         async loadReports() {
             this.reports.loading = true;
             const [names, noPeople, needsLI, browserEnrich, humanResearch, jobChanges, nameMismatches, needsLeadership, linkedinReview] = await Promise.all([
