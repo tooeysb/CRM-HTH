@@ -186,9 +186,10 @@ function crmApp() {
             try {
                 const headers = { 'Content-Type': 'application/json', ...options.headers };
                 if (window.CRM_API_KEY) headers['X-API-Key'] = window.CRM_API_KEY;
+                const { headers: _h, ...restOptions } = options;
                 const resp = await fetch('/crm/api/' + path, {
                     headers,
-                    ...options,
+                    ...restOptions,
                 });
                 if (!resp.ok) throw new Error(`API error: ${resp.status}`);
                 return await resp.json();
