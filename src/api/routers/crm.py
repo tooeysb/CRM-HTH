@@ -2315,6 +2315,45 @@ def report_needs_leadership_retry(
 
 
 # ---------------------------------------------------------------------------
+# GET /reports/all-gc-sc
+# ---------------------------------------------------------------------------
+
+
+@router.get("/reports/all-gc-sc")
+def report_all_gc_sc(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_sync_db),
+):
+    """All GC/SC companies with a domain — for comprehensive leadership discovery."""
+    uid = user.id
+
+    companies = (
+        db.query(Company)
+        .filter(
+            Company.user_id == uid,
+            Company.deleted_at.is_(None),
+            Company.domain.isnot(None),
+            Company.domain != "",
+            Company.company_type.in_(["General Contractor", "Specialty Contractor"]),
+        )
+        .order_by(Company.name.asc())
+        .all()
+    )
+
+    results = [
+        {
+            "id": str(c.id),
+            "name": c.name,
+            "domain": c.domain,
+            "company_type": c.company_type,
+        }
+        for c in companies
+    ]
+
+    return {"items": results, "total": len(results)}
+
+
+# ---------------------------------------------------------------------------
 # GET /reports/needs-logo-verification
 # ---------------------------------------------------------------------------
 

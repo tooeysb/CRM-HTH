@@ -346,6 +346,11 @@ def main():
         help="Retry GC/SC companies that were scraped but no leadership page found",
     )
     parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Process ALL GC/SC companies (including those already scraped)",
+    )
+    parser.add_argument(
         "--model",
         default=DEFAULT_MODEL,
         help=f"Claude model to use (default: {DEFAULT_MODEL})",
@@ -392,14 +397,19 @@ def main():
     try:
         # Fetch companies
         companies = []
-        if args.retry_failed:
-            retry = crm.get_needs_leadership_retry()
-            logger.info("Retry-failed: %d GC/SC companies", len(retry))
-            companies.extend(retry)
+        if args.all:
+            all_gc_sc = crm.get_all_gc_sc()
+            logger.info("All GC/SC companies: %d", len(all_gc_sc))
+            companies.extend(all_gc_sc)
+        else:
+            if args.retry_failed:
+                retry = crm.get_needs_leadership_retry()
+                logger.info("Retry-failed: %d GC/SC companies", len(retry))
+                companies.extend(retry)
 
-        new = crm.get_needs_leadership()
-        logger.info("New (never scraped): %d companies", len(new))
-        companies.extend(new)
+            new = crm.get_needs_leadership()
+            logger.info("New (never scraped): %d companies", len(new))
+            companies.extend(new)
 
         # Deduplicate by ID
         seen = set()

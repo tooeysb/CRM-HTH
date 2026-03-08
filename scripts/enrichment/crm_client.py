@@ -114,6 +114,12 @@ class CRMClient:
         resp.raise_for_status()
         return resp.json()["items"]
 
+    def get_all_gc_sc(self) -> list[dict]:
+        """All GC/SC companies with a domain (for comprehensive leadership discovery)."""
+        resp = self._client.get("/crm/api/reports/all-gc-sc")
+        resp.raise_for_status()
+        return resp.json()["items"]
+
     def get_needs_logo_verification(self) -> list[dict]:
         """Companies with linkedin_url and domain but no logo verification."""
         resp = self._client.get("/crm/api/reports/needs-logo-verification")
