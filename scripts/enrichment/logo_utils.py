@@ -118,7 +118,9 @@ def extract_website_logo(page: Page, domain: str) -> LogoResult:
     """
     result = LogoResult()
 
-    url = f"https://www.{domain}" if not domain.startswith("http") else domain
+    # Handle comma-separated domains — use the first one
+    primary_domain = domain.split(",")[0].strip()
+    url = f"https://www.{primary_domain}" if not primary_domain.startswith("http") else primary_domain
 
     try:
         resp = page.goto(url, wait_until="domcontentloaded", timeout=15000)
@@ -380,12 +382,19 @@ def _extract_domain(url_or_text: str) -> str | None:
 
 
 def domains_match(domain: str, linkedin_domain: str | None) -> bool:
-    """Check if the company domain matches the domain listed on LinkedIn."""
+    """Check if the company domain matches the domain listed on LinkedIn.
+
+    Handles comma-separated domain fields (e.g. "arco1.com, www.thearcoway.com").
+    """
     if not linkedin_domain:
         return False
-    norm1 = domain.lower().removeprefix("www.")
-    norm2 = linkedin_domain.lower().removeprefix("www.")
-    return norm1 == norm2
+    norm_li = linkedin_domain.lower().removeprefix("www.")
+    # Check each domain in the comma-separated list
+    for d in domain.split(","):
+        norm_d = d.strip().lower().removeprefix("www.")
+        if norm_d and norm_d == norm_li:
+            return True
+    return False
 
 
 def names_match(company_name: str, website_title: str | None, linkedin_name: str | None) -> bool:
