@@ -67,6 +67,14 @@
                                 class="px-3 py-1.5 rounded-md text-sm font-medium transition-colors">
                                 Outreach
                             </button>
+                            <button @click="navigate('linkedin')"
+                                :class="currentView === 'linkedin' ? 'bg-primary-50 text-primary-700' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'"
+                                class="px-3 py-1.5 rounded-md text-sm font-medium transition-colors">
+                                LinkedIn
+                                <template x-if="linkedin.postsTotal > 0">
+                                    <span class="ml-1 inline-flex items-center justify-center w-5 h-5 text-[10px] font-bold text-white bg-red-500 rounded-full" x-text="linkedin.postsTotal > 99 ? '99+' : linkedin.postsTotal"></span>
+                                </template>
+                            </button>
                             <button @click="navigate('admin')"
                                 :class="currentView === 'admin' ? 'bg-primary-50 text-primary-700' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'"
                                 class="px-3 py-1.5 rounded-md text-sm font-medium transition-colors">
@@ -445,6 +453,7 @@
                                     </th>
                                     <th class="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider hidden md:table-cell">Last Email Received</th>
                                     <th class="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider hidden md:table-cell">Last Email Sent</th>
+                                    <th class="text-center px-3 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider w-12 hidden lg:table-cell">Tier</th>
                                     <th class="text-center px-3 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider w-12">
                                         <button @click="toggleSort('contacts', 'is_vip')" class="inline-flex items-center hover:text-gray-700">
                                             VIP
@@ -490,6 +499,13 @@
                                         </td>
                                         <td class="px-5 py-3 hidden md:table-cell">
                                             <span class="text-xs text-gray-500" x-text="c.last_email_sent ? timeAgo(c.last_email_sent) : '—'"></span>
+                                        </td>
+                                        <td class="px-3 py-3 text-center hidden lg:table-cell">
+                                            <template x-if="c.monitoring_tier">
+                                                <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold"
+                                                    :class="tierBadgeClass(c.monitoring_tier)"
+                                                    x-text="c.monitoring_tier"></span>
+                                            </template>
                                         </td>
                                         <td class="px-3 py-3 text-center">
                                             <button @click.stop="toggleVip(c)" class="p-0.5 hover:scale-110 transition-transform">
@@ -942,6 +958,226 @@
                 </template>
             </div>
 
+            <!-- ==================== LINKEDIN VIEW ==================== -->
+            <div x-show="currentView === 'linkedin'">
+
+                <!-- Sub-Tab Bar -->
+                <div class="mb-6 border-b border-gray-200">
+                    <nav class="flex gap-6" aria-label="LinkedIn sections">
+                        <button @click="linkedin.tab = 'posts'"
+                            :class="linkedin.tab === 'posts' ? 'border-primary-500 text-primary-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
+                            class="whitespace-nowrap pb-3 px-1 border-b-2 font-medium text-sm transition-colors">
+                            New Posts
+                            <span class="ml-1.5 text-xs font-normal" :class="linkedin.tab === 'posts' ? 'text-primary-500' : 'text-gray-400'"
+                                x-text="'(' + linkedin.postsTotal + ')'"></span>
+                        </button>
+                        <button @click="linkedin.tab = 'jobChanges'"
+                            :class="linkedin.tab === 'jobChanges' ? 'border-primary-500 text-primary-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
+                            class="whitespace-nowrap pb-3 px-1 border-b-2 font-medium text-sm transition-colors">
+                            Job Changes
+                            <span class="ml-1.5 text-xs font-normal" :class="linkedin.tab === 'jobChanges' ? 'text-primary-500' : 'text-gray-400'"
+                                x-text="'(' + (linkedin.jobChanges || []).length + ')'"></span>
+                        </button>
+                        <button @click="linkedin.tab = 'titleChanges'"
+                            :class="linkedin.tab === 'titleChanges' ? 'border-primary-500 text-primary-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
+                            class="whitespace-nowrap pb-3 px-1 border-b-2 font-medium text-sm transition-colors">
+                            Title Changes
+                            <span class="ml-1.5 text-xs font-normal" :class="linkedin.tab === 'titleChanges' ? 'text-primary-500' : 'text-gray-400'"
+                                x-text="'(' + (linkedin.titleChanges || []).length + ')'"></span>
+                        </button>
+                        <button @click="linkedin.tab = 'tiers'"
+                            :class="linkedin.tab === 'tiers' ? 'border-primary-500 text-primary-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
+                            class="whitespace-nowrap pb-3 px-1 border-b-2 font-medium text-sm transition-colors">
+                            Monitoring Tiers
+                        </button>
+                    </nav>
+                </div>
+
+                <!-- Loading -->
+                <template x-if="linkedin.loading">
+                    <div class="flex items-center justify-center py-20">
+                        <svg class="spinner w-6 h-6 text-primary-600" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                        </svg>
+                    </div>
+                </template>
+
+                <!-- ===== Posts Sub-Tab ===== -->
+                <div x-show="!linkedin.loading && linkedin.tab === 'posts'">
+
+                    <!-- Mark All Seen -->
+                    <div x-show="linkedin.posts.length > 0" class="mb-4 flex items-center justify-between">
+                        <p class="text-sm text-gray-500">
+                            <span x-text="linkedin.postsTotal"></span> new posts from your contacts
+                        </p>
+                        <button @click="markAllPostsSeen()"
+                            class="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-900 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
+                            Mark All Seen
+                        </button>
+                    </div>
+
+                    <!-- Post Cards -->
+                    <div class="space-y-3">
+                        <template x-for="post in linkedin.posts" :key="post.id">
+                            <div class="bg-white rounded-xl border border-gray-200 p-4 hover:shadow-sm transition-shadow">
+                                <div class="flex items-start justify-between">
+                                    <div class="flex-1 min-w-0">
+                                        <div class="flex items-center gap-2 mb-1">
+                                            <span class="text-sm font-semibold text-gray-900" x-text="post.contact_name || 'Unknown'"></span>
+                                            <template x-if="post.company_name">
+                                                <span class="text-xs text-gray-500">at <span x-text="post.company_name"></span></span>
+                                            </template>
+                                            <template x-if="post.post_type && post.post_type !== 'original'">
+                                                <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-gray-100 text-gray-600" x-text="post.post_type"></span>
+                                            </template>
+                                        </div>
+                                        <p class="text-sm text-gray-600 line-clamp-3 mb-2" x-text="truncateText(post.post_text, 300)"></p>
+                                        <div class="flex items-center gap-3 text-xs text-gray-400">
+                                            <template x-if="post.post_date">
+                                                <span x-text="timeAgo(post.post_date)"></span>
+                                            </template>
+                                            <template x-if="post.engagement_count">
+                                                <span x-text="post.engagement_count + ' engagements'"></span>
+                                            </template>
+                                        </div>
+                                    </div>
+                                    <div class="ml-3 flex items-center gap-2 flex-shrink-0">
+                                        <a :href="post.post_url" target="_blank" rel="noopener"
+                                            @click.stop
+                                            class="px-3 py-1.5 text-xs font-medium text-[#0A66C2] bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors">
+                                            View on LinkedIn
+                                        </a>
+                                        <button @click="markPostSeen(post.id)"
+                                            class="px-3 py-1.5 text-xs font-medium text-gray-500 bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors"
+                                            title="Mark as seen">
+                                            Dismiss
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+
+                    <!-- Empty State -->
+                    <div x-show="linkedin.posts.length === 0" class="bg-white rounded-xl border border-gray-200 px-6 py-12 text-center">
+                        <svg class="w-12 h-12 mx-auto text-gray-300 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                        </svg>
+                        <p class="text-sm text-gray-500">No new posts — you're all caught up!</p>
+                    </div>
+                </div>
+
+                <!-- ===== Job Changes Sub-Tab ===== -->
+                <div x-show="!linkedin.loading && linkedin.tab === 'jobChanges'">
+                    <div x-show="linkedin.jobChanges.length > 0" class="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                        <table class="w-full">
+                            <thead>
+                                <tr class="border-b border-gray-100">
+                                    <th class="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Contact</th>
+                                    <th class="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Previous Company</th>
+                                    <th class="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">New Company (LinkedIn)</th>
+                                    <th class="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Detected</th>
+                                    <th class="text-right px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-gray-50">
+                                <template x-for="jc in linkedin.jobChanges" :key="jc.id">
+                                    <tr class="hover:bg-gray-50 transition-colors">
+                                        <td class="px-5 py-3">
+                                            <button @click="openContactDetail(jc.id)" class="text-sm font-medium text-primary-600 hover:text-primary-700" x-text="jc.name || jc.email"></button>
+                                        </td>
+                                        <td class="px-5 py-3 text-sm text-gray-600" x-text="jc.company_name || '-'"></td>
+                                        <td class="px-5 py-3">
+                                            <span class="text-sm font-medium text-red-600" x-text="jc.linkedin_company_raw || '(no company listed)'"></span>
+                                        </td>
+                                        <td class="px-5 py-3 text-sm text-gray-500" x-text="timeAgo(jc.job_change_detected_at)"></td>
+                                        <td class="px-5 py-3 text-right">
+                                            <template x-if="jc.linkedin_url">
+                                                <a :href="jc.linkedin_url" target="_blank" rel="noopener" @click.stop
+                                                    class="text-xs text-[#0A66C2] hover:underline">Profile</a>
+                                            </template>
+                                        </td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div x-show="linkedin.jobChanges.length === 0" class="bg-white rounded-xl border border-gray-200 px-6 py-12 text-center">
+                        <p class="text-sm text-gray-500">No job changes detected yet.</p>
+                    </div>
+                </div>
+
+                <!-- ===== Title Changes Sub-Tab ===== -->
+                <div x-show="!linkedin.loading && linkedin.tab === 'titleChanges'">
+                    <div x-show="linkedin.titleChanges.length > 0" class="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                        <table class="w-full">
+                            <thead>
+                                <tr class="border-b border-gray-100">
+                                    <th class="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Contact</th>
+                                    <th class="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Company</th>
+                                    <th class="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Previous Title</th>
+                                    <th class="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">New Title (LinkedIn)</th>
+                                    <th class="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Detected</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-gray-50">
+                                <template x-for="tc in linkedin.titleChanges" :key="tc.id">
+                                    <tr class="hover:bg-gray-50 transition-colors">
+                                        <td class="px-5 py-3">
+                                            <button @click="openContactDetail(tc.id)" class="text-sm font-medium text-primary-600 hover:text-primary-700" x-text="tc.name || tc.email"></button>
+                                        </td>
+                                        <td class="px-5 py-3 text-sm text-gray-600" x-text="tc.company_name || '-'"></td>
+                                        <td class="px-5 py-3 text-sm text-gray-500" x-text="tc.previous_title || '-'"></td>
+                                        <td class="px-5 py-3">
+                                            <span class="text-sm font-medium text-orange-600" x-text="tc.linkedin_title_raw || '-'"></span>
+                                        </td>
+                                        <td class="px-5 py-3 text-sm text-gray-500" x-text="timeAgo(tc.title_change_detected_at)"></td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div x-show="linkedin.titleChanges.length === 0" class="bg-white rounded-xl border border-gray-200 px-6 py-12 text-center">
+                        <p class="text-sm text-gray-500">No title changes detected yet.</p>
+                    </div>
+                </div>
+
+                <!-- ===== Monitoring Tiers Sub-Tab ===== -->
+                <div x-show="!linkedin.loading && linkedin.tab === 'tiers'">
+                    <!-- Summary Stats -->
+                    <template x-if="linkedin.summary">
+                        <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
+                            <div class="bg-white rounded-xl border border-gray-200 p-4">
+                                <div class="text-2xl font-bold text-green-600" x-text="linkedin.summary.tier_a || 0"></div>
+                                <div class="text-xs text-gray-500 mt-1">Tier A (2x/week)</div>
+                            </div>
+                            <div class="bg-white rounded-xl border border-gray-200 p-4">
+                                <div class="text-2xl font-bold text-blue-600" x-text="linkedin.summary.tier_b || 0"></div>
+                                <div class="text-xs text-gray-500 mt-1">Tier B (weekly)</div>
+                            </div>
+                            <div class="bg-white rounded-xl border border-gray-200 p-4">
+                                <div class="text-2xl font-bold text-gray-600" x-text="linkedin.summary.tier_c || 0"></div>
+                                <div class="text-xs text-gray-500 mt-1">Tier C (monthly)</div>
+                            </div>
+                            <div class="bg-white rounded-xl border border-gray-200 p-4">
+                                <div class="text-2xl font-bold text-gray-400" x-text="linkedin.summary.untiered || 0"></div>
+                                <div class="text-xs text-gray-500 mt-1">Untiered</div>
+                            </div>
+                        </div>
+                    </template>
+
+                    <div class="bg-white rounded-xl border border-gray-200 px-6 py-8 text-center">
+                        <svg class="w-12 h-12 mx-auto text-gray-300 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"/>
+                        </svg>
+                        <p class="text-sm text-gray-500 mb-1">Tier management is available in each contact's detail panel.</p>
+                        <p class="text-xs text-gray-400">Click on a contact in the People tab to set their monitoring tier. Auto-tiering runs daily based on email signal strength.</p>
+                    </div>
+                </div>
+
+            </div>
+
             <!-- ==================== ADMIN VIEW ==================== -->
             <div x-show="currentView === 'admin'">
 
@@ -964,74 +1200,87 @@
                 <!-- ===== Admin > Reports ===== -->
                 <div x-show="admin.selected === 'reports'">
 
-                <!-- Report Tabs -->
-                <div class="mb-6 border-b border-gray-200">
-                    <nav class="flex gap-6" aria-label="Reports">
-                        <button @click="reports.selected = 'needsLinkedIn'"
-                            :class="reports.selected === 'needsLinkedIn' ? 'border-primary-500 text-primary-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
-                            class="whitespace-nowrap pb-3 px-1 border-b-2 font-medium text-sm transition-colors">
-                            Needs LinkedIn URL
-                            <span class="ml-1.5 text-xs font-normal" :class="reports.selected === 'needsLinkedIn' ? 'text-primary-500' : 'text-gray-400'"
-                                x-text="'(' + (reports.needsLinkedIn || []).length + ')'"></span>
-                        </button>
-                        <button @click="reports.selected = 'challengingNames'"
-                            :class="reports.selected === 'challengingNames' ? 'border-primary-500 text-primary-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
-                            class="whitespace-nowrap pb-3 px-1 border-b-2 font-medium text-sm transition-colors">
-                            Challenging Company Names
-                            <span class="ml-1.5 text-xs font-normal" :class="reports.selected === 'challengingNames' ? 'text-primary-500' : 'text-gray-400'"
-                                x-text="'(' + (reports.challengingNames || []).length + ')'"></span>
-                        </button>
-                        <button @click="reports.selected = 'companiesWithoutPeople'"
-                            :class="reports.selected === 'companiesWithoutPeople' ? 'border-primary-500 text-primary-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
-                            class="whitespace-nowrap pb-3 px-1 border-b-2 font-medium text-sm transition-colors">
-                            Companies without People
-                            <span class="ml-1.5 text-xs font-normal" :class="reports.selected === 'companiesWithoutPeople' ? 'text-primary-500' : 'text-gray-400'"
-                                x-text="'(' + (reports.companiesWithoutPeople || []).length + ')'"></span>
-                        </button>
-                        <button @click="reports.selected = 'browserEnrich'"
-                            :class="reports.selected === 'browserEnrich' ? 'border-primary-500 text-primary-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
-                            class="whitespace-nowrap pb-3 px-1 border-b-2 font-medium text-sm transition-colors">
-                            Browser Enrichment
-                            <span class="ml-1.5 text-xs font-normal" :class="reports.selected === 'browserEnrich' ? 'text-primary-500' : 'text-gray-400'"
-                                x-text="'(' + (reports.needsBrowserEnrich || []).length + ')'"></span>
-                        </button>
-                        <button @click="reports.selected = 'humanResearch'"
-                            :class="reports.selected === 'humanResearch' ? 'border-primary-500 text-primary-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
-                            class="whitespace-nowrap pb-3 px-1 border-b-2 font-medium text-sm transition-colors">
-                            Needs Human Research
-                            <span class="ml-1.5 text-xs font-normal" :class="reports.selected === 'humanResearch' ? 'text-primary-500' : 'text-gray-400'"
-                                x-text="'(' + (reports.needsHumanResearch || []).length + ')'"></span>
-                        </button>
-                        <button @click="reports.selected = 'jobChanges'"
-                            :class="reports.selected === 'jobChanges' ? 'border-primary-500 text-primary-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
-                            class="whitespace-nowrap pb-3 px-1 border-b-2 font-medium text-sm transition-colors">
-                            Job Changes
-                            <span class="ml-1.5 text-xs font-normal" :class="reports.selected === 'jobChanges' ? 'text-primary-500' : 'text-gray-400'"
-                                x-text="'(' + (reports.jobChanges || []).length + ')'"></span>
-                        </button>
-                        <button @click="reports.selected = 'nameMismatches'"
-                            :class="reports.selected === 'nameMismatches' ? 'border-primary-500 text-primary-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
-                            class="whitespace-nowrap pb-3 px-1 border-b-2 font-medium text-sm transition-colors">
-                            Name Mismatches
-                            <span class="ml-1.5 text-xs font-normal" :class="reports.selected === 'nameMismatches' ? 'text-primary-500' : 'text-gray-400'"
-                                x-text="'(' + (reports.nameMismatches || []).length + ')'"></span>
-                        </button>
-                        <button @click="reports.selected = 'linkedinReview'"
-                            :class="reports.selected === 'linkedinReview' ? 'border-primary-500 text-primary-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
-                            class="whitespace-nowrap pb-3 px-1 border-b-2 font-medium text-sm transition-colors">
-                            LinkedIn Review
-                            <span class="ml-1.5 text-xs font-normal" :class="reports.selected === 'linkedinReview' ? 'text-primary-500' : 'text-gray-400'"
-                                x-text="'(' + (reports.linkedinReview || []).length + ')'"></span>
-                        </button>
-                        <button @click="reports.selected = 'leadership'"
-                            :class="reports.selected === 'leadership' ? 'border-primary-500 text-primary-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
-                            class="whitespace-nowrap pb-3 px-1 border-b-2 font-medium text-sm transition-colors">
-                            Leadership Discovery
-                            <span class="ml-1.5 text-xs font-normal" :class="reports.selected === 'leadership' ? 'text-primary-500' : 'text-gray-400'"
-                                x-text="'(' + (reports.needsLeadership || []).length + ')'"></span>
-                        </button>
-                    </nav>
-                </div>
+                <!-- Report Sidebar + Content Layout -->
+                <div class="flex gap-6">
+
+                <!-- Report Sidebar -->
+                <nav class="w-56 flex-shrink-0 space-y-0.5" aria-label="Reports">
+                    <button @click="reports.selected = 'needsLinkedIn'"
+                        :class="reports.selected === 'needsLinkedIn' ? 'bg-primary-50 text-primary-700 font-medium' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'"
+                        class="w-full flex items-center justify-between px-3 py-2 text-sm rounded-lg transition-colors">
+                        <span>Needs LinkedIn URL</span>
+                        <span class="text-xs rounded-full px-2 py-0.5"
+                            :class="reports.selected === 'needsLinkedIn' ? 'bg-primary-100 text-primary-600' : ((reports.needsLinkedIn || []).length === 0 ? 'bg-gray-50 text-gray-400' : 'bg-gray-100 text-gray-500')"
+                            x-text="(reports.needsLinkedIn || []).length"></span>
+                    </button>
+                    <button @click="reports.selected = 'challengingNames'"
+                        :class="reports.selected === 'challengingNames' ? 'bg-primary-50 text-primary-700 font-medium' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'"
+                        class="w-full flex items-center justify-between px-3 py-2 text-sm rounded-lg transition-colors">
+                        <span>Challenging Names</span>
+                        <span class="text-xs rounded-full px-2 py-0.5"
+                            :class="reports.selected === 'challengingNames' ? 'bg-primary-100 text-primary-600' : ((reports.challengingNames || []).length === 0 ? 'bg-gray-50 text-gray-400' : 'bg-gray-100 text-gray-500')"
+                            x-text="(reports.challengingNames || []).length"></span>
+                    </button>
+                    <button @click="reports.selected = 'companiesWithoutPeople'"
+                        :class="reports.selected === 'companiesWithoutPeople' ? 'bg-primary-50 text-primary-700 font-medium' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'"
+                        class="w-full flex items-center justify-between px-3 py-2 text-sm rounded-lg transition-colors">
+                        <span>No People</span>
+                        <span class="text-xs rounded-full px-2 py-0.5"
+                            :class="reports.selected === 'companiesWithoutPeople' ? 'bg-primary-100 text-primary-600' : ((reports.companiesWithoutPeople || []).length === 0 ? 'bg-gray-50 text-gray-400' : 'bg-gray-100 text-gray-500')"
+                            x-text="(reports.companiesWithoutPeople || []).length"></span>
+                    </button>
+                    <button @click="reports.selected = 'browserEnrich'"
+                        :class="reports.selected === 'browserEnrich' ? 'bg-primary-50 text-primary-700 font-medium' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'"
+                        class="w-full flex items-center justify-between px-3 py-2 text-sm rounded-lg transition-colors">
+                        <span>Browser Enrichment</span>
+                        <span class="text-xs rounded-full px-2 py-0.5"
+                            :class="reports.selected === 'browserEnrich' ? 'bg-primary-100 text-primary-600' : ((reports.needsBrowserEnrich || []).length === 0 ? 'bg-gray-50 text-gray-400' : 'bg-gray-100 text-gray-500')"
+                            x-text="(reports.needsBrowserEnrich || []).length"></span>
+                    </button>
+                    <button @click="reports.selected = 'humanResearch'"
+                        :class="reports.selected === 'humanResearch' ? 'bg-primary-50 text-primary-700 font-medium' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'"
+                        class="w-full flex items-center justify-between px-3 py-2 text-sm rounded-lg transition-colors">
+                        <span>Human Research</span>
+                        <span class="text-xs rounded-full px-2 py-0.5"
+                            :class="reports.selected === 'humanResearch' ? 'bg-primary-100 text-primary-600' : ((reports.needsHumanResearch || []).length === 0 ? 'bg-gray-50 text-gray-400' : 'bg-gray-100 text-gray-500')"
+                            x-text="(reports.needsHumanResearch || []).length"></span>
+                    </button>
+                    <button @click="reports.selected = 'jobChanges'"
+                        :class="reports.selected === 'jobChanges' ? 'bg-primary-50 text-primary-700 font-medium' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'"
+                        class="w-full flex items-center justify-between px-3 py-2 text-sm rounded-lg transition-colors">
+                        <span>Job Changes</span>
+                        <span class="text-xs rounded-full px-2 py-0.5"
+                            :class="reports.selected === 'jobChanges' ? 'bg-primary-100 text-primary-600' : ((reports.jobChanges || []).length === 0 ? 'bg-gray-50 text-gray-400' : 'bg-gray-100 text-gray-500')"
+                            x-text="(reports.jobChanges || []).length"></span>
+                    </button>
+                    <button @click="reports.selected = 'nameMismatches'"
+                        :class="reports.selected === 'nameMismatches' ? 'bg-primary-50 text-primary-700 font-medium' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'"
+                        class="w-full flex items-center justify-between px-3 py-2 text-sm rounded-lg transition-colors">
+                        <span>Name Mismatches</span>
+                        <span class="text-xs rounded-full px-2 py-0.5"
+                            :class="reports.selected === 'nameMismatches' ? 'bg-primary-100 text-primary-600' : ((reports.nameMismatches || []).length === 0 ? 'bg-gray-50 text-gray-400' : 'bg-gray-100 text-gray-500')"
+                            x-text="(reports.nameMismatches || []).length"></span>
+                    </button>
+                    <button @click="reports.selected = 'linkedinReview'"
+                        :class="reports.selected === 'linkedinReview' ? 'bg-primary-50 text-primary-700 font-medium' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'"
+                        class="w-full flex items-center justify-between px-3 py-2 text-sm rounded-lg transition-colors">
+                        <span>LinkedIn Review</span>
+                        <span class="text-xs rounded-full px-2 py-0.5"
+                            :class="reports.selected === 'linkedinReview' ? 'bg-primary-100 text-primary-600' : ((reports.linkedinReview || []).length === 0 ? 'bg-gray-50 text-gray-400' : 'bg-gray-100 text-gray-500')"
+                            x-text="(reports.linkedinReview || []).length"></span>
+                    </button>
+                    <button @click="reports.selected = 'leadership'"
+                        :class="reports.selected === 'leadership' ? 'bg-primary-50 text-primary-700 font-medium' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'"
+                        class="w-full flex items-center justify-between px-3 py-2 text-sm rounded-lg transition-colors">
+                        <span>Leadership Discovery</span>
+                        <span class="text-xs rounded-full px-2 py-0.5"
+                            :class="reports.selected === 'leadership' ? 'bg-primary-100 text-primary-600' : ((reports.needsLeadership || []).length === 0 ? 'bg-gray-50 text-gray-400' : 'bg-gray-100 text-gray-500')"
+                            x-text="(reports.needsLeadership || []).length"></span>
+                    </button>
+                </nav>
+
+                <!-- Report Content -->
+                <div class="flex-1 min-w-0">
 
                 <!-- Shared Loading State -->
                 <template x-if="reports.loading">
@@ -1542,6 +1791,9 @@
                     </template>
                 </div>
 
+                </div><!-- /Report Content -->
+                </div><!-- /Report Sidebar + Content Layout -->
+
                 </div><!-- /Admin > Reports -->
 
 
@@ -1817,6 +2069,26 @@
                                                 <option value="Executive Sponsor">Executive Sponsor</option>
                                                 <option value="Blocker">Blocker</option>
                                             </select>
+                                        </template>
+                                    </div>
+                                </div>
+                                <!-- Monitoring Tier -->
+                                <div>
+                                    <label class="text-xs font-medium text-gray-500 uppercase tracking-wider">Monitoring Tier</label>
+                                    <div class="mt-1">
+                                        <select @change="setContactTier(detail.id, $event.target.value); detail.data.contact.monitoring_tier = $event.target.value || null"
+                                            :value="detail.data.contact.monitoring_tier || ''"
+                                            class="text-sm border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-primary-500">
+                                            <option value="">None</option>
+                                            <option value="A">A — 2x/week</option>
+                                            <option value="B">B — Weekly</option>
+                                            <option value="C">C — Monthly</option>
+                                        </select>
+                                        <template x-if="detail.data.contact.tier_manually_set">
+                                            <span class="ml-1 text-[10px] text-amber-600 font-medium">Manual</span>
+                                        </template>
+                                        <template x-if="detail.data.contact.tier_auto_suggested && detail.data.contact.tier_auto_suggested !== detail.data.contact.monitoring_tier">
+                                            <span class="ml-1 text-[10px] text-gray-400">Suggested: <span x-text="detail.data.contact.tier_auto_suggested"></span></span>
                                         </template>
                                     </div>
                                 </div>
