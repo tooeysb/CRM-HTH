@@ -1821,6 +1821,7 @@
                                         <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hidden sm:table-cell">Website</th>
                                         <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hidden sm:table-cell">LinkedIn</th>
                                         <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hidden md:table-cell">Distance</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Action</th>
                                     </tr>
                                 </thead>
                                 <tbody class="bg-white divide-y divide-gray-200">
@@ -1842,6 +1843,12 @@
                                                 </a>
                                             </td>
                                             <td class="px-6 py-3 text-sm text-gray-500 hidden md:table-cell" x-text="item.logo_hash_distance ?? '—'"></td>
+                                            <td class="px-6 py-3">
+                                                <button @click="retryLogoVerification(item.id)"
+                                                    class="text-xs font-medium text-primary-600 hover:text-primary-800">
+                                                    Retry
+                                                </button>
+                                            </td>
                                         </tr>
                                     </template>
                                 </tbody>

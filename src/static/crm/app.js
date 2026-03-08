@@ -541,6 +541,23 @@ function crmApp() {
             }
         },
 
+        async retryLogoVerification(companyId) {
+            const result = await this.apiFetch('companies/' + companyId, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    logo_verified: null,
+                    logo_verified_at: null,
+                    logo_hash_website: null,
+                    logo_hash_linkedin: null,
+                    logo_hash_distance: null,
+                }),
+            });
+            if (result) {
+                this.reports.logoReview = this.reports.logoReview.filter(c => c.id !== companyId);
+            }
+        },
+
         // ==================== CONTACT EMAILS ====================
         async loadContactEmails(id, reset = false) {
             if (reset) {
