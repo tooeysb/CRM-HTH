@@ -1277,6 +1277,14 @@
                             :class="reports.selected === 'leadership' ? 'bg-primary-100 text-primary-600' : ((reports.needsLeadership || []).length === 0 ? 'bg-gray-50 text-gray-400' : 'bg-gray-100 text-gray-500')"
                             x-text="(reports.needsLeadership || []).length"></span>
                     </button>
+                    <button @click="reports.selected = 'missingLinkedIn'"
+                        :class="reports.selected === 'missingLinkedIn' ? 'bg-primary-50 text-primary-700 font-medium' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'"
+                        class="w-full flex items-center justify-between px-3 py-2 text-sm rounded-lg transition-colors">
+                        <span>Missing LinkedIn</span>
+                        <span class="text-xs rounded-full px-2 py-0.5"
+                            :class="reports.selected === 'missingLinkedIn' ? 'bg-primary-100 text-primary-600' : ((reports.missingLinkedIn || []).length === 0 ? 'bg-gray-50 text-gray-400' : 'bg-gray-100 text-gray-500')"
+                            x-text="(reports.missingLinkedIn || []).length"></span>
+                    </button>
                     <button @click="reports.selected = 'logoReview'"
                         :class="reports.selected === 'logoReview' ? 'bg-primary-50 text-primary-700 font-medium' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'"
                         class="w-full flex items-center justify-between px-3 py-2 text-sm rounded-lg transition-colors">
@@ -1789,6 +1797,56 @@
                                                     target="_blank" rel="noopener"
                                                     class="text-xs font-medium text-primary-600 hover:text-primary-800">
                                                     Search &nearr;
+                                                </a>
+                                            </td>
+                                        </tr>
+                                    </template>
+                                </tbody>
+                            </table>
+                        </div>
+                    </template>
+                </div>
+
+                <!-- ===== Report: Missing LinkedIn ===== -->
+                <div x-show="!reports.loading && reports.selected === 'missingLinkedIn'">
+                    <p class="text-sm text-gray-500 mb-4">Companies with a website domain where the automated enricher could not find a LinkedIn company page. Search LinkedIn manually and add the correct URL.</p>
+
+                    <template x-if="(reports.missingLinkedIn || []).length === 0">
+                        <div class="bg-white rounded-xl border border-gray-200 shadow-sm px-6 py-12 text-center">
+                            <svg class="mx-auto h-10 w-10 text-green-400" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                            <p class="mt-2 text-sm font-medium text-gray-900">All companies with domains have LinkedIn URLs.</p>
+                        </div>
+                    </template>
+
+                    <template x-if="(reports.missingLinkedIn || []).length > 0">
+                        <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                            <table class="min-w-full divide-y divide-gray-200">
+                                <thead class="bg-gray-50">
+                                    <tr>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Company</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hidden sm:table-cell">Website</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Search</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="bg-white divide-y divide-gray-200">
+                                    <template x-for="item in reports.missingLinkedIn" :key="item.id">
+                                        <tr class="hover:bg-gray-50">
+                                            <td class="px-6 py-3 text-left">
+                                                <button @click="openCompanyDetail(item.id)" class="text-sm font-medium text-primary-600 hover:text-primary-800 hover:underline"
+                                                    x-text="item.name"></button>
+                                            </td>
+                                            <td class="px-6 py-3 text-left hidden sm:table-cell">
+                                                <a :href="'https://www.' + (item.domain || '').split(',')[0].trim()" target="_blank" rel="noopener"
+                                                    class="text-sm text-primary-600 hover:text-primary-800 hover:underline"
+                                                    x-text="(item.domain || '').split(',')[0].trim()"></a>
+                                            </td>
+                                            <td class="px-6 py-3">
+                                                <a :href="'https://www.linkedin.com/search/results/companies/?keywords=' + encodeURIComponent(item.name)"
+                                                    target="_blank" rel="noopener"
+                                                    class="text-xs font-medium text-primary-600 hover:text-primary-800">
+                                                    LinkedIn &nearr;
                                                 </a>
                                             </td>
                                         </tr>

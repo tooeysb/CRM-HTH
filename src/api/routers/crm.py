@@ -2306,6 +2306,44 @@ def report_needs_company_linkedin(
 
 
 # ---------------------------------------------------------------------------
+# GET /reports/missing-company-linkedin
+# ---------------------------------------------------------------------------
+
+
+@router.get("/reports/missing-company-linkedin")
+def report_missing_company_linkedin(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_sync_db),
+):
+    """Companies with a domain but no LinkedIn URL — enricher couldn't find a match."""
+    uid = user.id
+
+    companies = (
+        db.query(Company)
+        .filter(
+            Company.user_id == uid,
+            Company.deleted_at.is_(None),
+            Company.linkedin_url.is_(None),
+            Company.domain.isnot(None),
+            Company.domain != "",
+        )
+        .order_by(Company.name.asc())
+        .all()
+    )
+
+    results = [
+        {
+            "id": str(c.id),
+            "name": c.name,
+            "domain": c.domain,
+        }
+        for c in companies
+    ]
+
+    return {"items": results, "total": len(results)}
+
+
+# ---------------------------------------------------------------------------
 # GET /reports/needs-company-linkedin-review
 # ---------------------------------------------------------------------------
 

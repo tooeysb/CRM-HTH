@@ -897,7 +897,7 @@ function crmApp() {
 
         async loadReports() {
             this.reports.loading = true;
-            const [names, noPeople, needsLI, browserEnrich, humanResearch, jobChanges, nameMismatches, needsLeadership, linkedinReview, logoReview] = await Promise.all([
+            const [names, noPeople, needsLI, browserEnrich, humanResearch, jobChanges, nameMismatches, needsLeadership, linkedinReview, missingLinkedIn, logoReview] = await Promise.all([
                 this.apiFetch('reports/challenging-names'),
                 this.apiFetch('reports/companies-without-people'),
                 this.apiFetch('reports/needs-linkedin-url'),
@@ -907,6 +907,7 @@ function crmApp() {
                 this.apiFetch('reports/company-name-mismatches'),
                 this.apiFetch('reports/needs-leadership-discovery'),
                 this.apiFetch('reports/needs-company-linkedin-review'),
+                this.apiFetch('reports/missing-company-linkedin'),
                 this.apiFetch('reports/logo-review'),
             ]);
             if (names) this.reports.challengingNames = names.items || [];
@@ -918,6 +919,7 @@ function crmApp() {
             if (nameMismatches) this.reports.nameMismatches = nameMismatches.items || [];
             if (needsLeadership) this.reports.needsLeadership = needsLeadership.items || [];
             if (linkedinReview) this.reports.linkedinReview = linkedinReview.items || [];
+            if (missingLinkedIn) this.reports.missingLinkedIn = missingLinkedIn.items || [];
             if (logoReview) this.reports.logoReview = logoReview.items || [];
             this.reports.loading = false;
         },
