@@ -1707,6 +1707,59 @@ def add_contact_to_company(
 
 
 # ---------------------------------------------------------------------------
+# POST /companies
+# ---------------------------------------------------------------------------
+
+
+class CompanyCreateRequest(BaseModel):
+    name: str
+    domain: str | None = None
+    company_type: str | None = None
+    work_type: str | None = None
+    billing_state: str | None = None
+    source_data: dict | None = None
+    notes: str | None = None
+
+
+@router.post("/companies")
+def create_company(
+    body: CompanyCreateRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_sync_db),
+):
+    """Create a new company."""
+    uid = user.id
+
+    company = Company(
+        user_id=uid,
+        name=body.name,
+        domain=body.domain,
+        company_type=body.company_type,
+        work_type=body.work_type,
+        billing_state=body.billing_state,
+        source_data=body.source_data,
+        notes=body.notes,
+    )
+
+    # ENR-ranked companies are always General Contractor
+    if body.source_data and body.source_data.get("enr", {}).get("rank_2024"):
+        company.company_type = "General Contractor"
+
+    try:
+        db.add(company)
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail=f"A company named '{body.name}' already exists",
+        ) from None
+    db.refresh(company)
+
+    return _serialize_company(company, 0)
+
+
+# ---------------------------------------------------------------------------
 # PATCH /companies/{id}
 # ---------------------------------------------------------------------------
 

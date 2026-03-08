@@ -78,6 +78,12 @@ class CRMClient:
         resp.raise_for_status()
         return resp.json().get("items", [])
 
+    def create_company(self, **fields) -> dict:
+        """POST /crm/api/companies — create a new company."""
+        resp = self._client.post("/crm/api/companies", json=fields)
+        resp.raise_for_status()
+        return resp.json()
+
     def update_company(self, company_id: str, **fields) -> dict:
         """PATCH /crm/api/companies/{id} with partial update."""
         resp = self._client.patch(f"/crm/api/companies/{company_id}", json=fields)
