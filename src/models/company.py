@@ -11,6 +11,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    Integer,
     Numeric,
     String,
     Text,
@@ -167,6 +168,23 @@ class Company(Base, UUIDMixin, TimestampMixin):
         server_default="false",
         nullable=False,
         comment="Manually approved by user as verified/complete",
+    )
+
+    # Logo Verification
+    logo_verified: Mapped[bool | None] = mapped_column(
+        Boolean, nullable=True, comment="Whether website and LinkedIn logos matched"
+    )
+    logo_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, comment="When logo verification was last run"
+    )
+    logo_hash_website: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, comment="Perceptual hash of company website logo"
+    )
+    logo_hash_linkedin: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, comment="Perceptual hash of LinkedIn company logo"
+    )
+    logo_hash_distance: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, comment="Hamming distance between website and LinkedIn logo hashes"
     )
 
     deleted_at: Mapped[datetime | None] = mapped_column(

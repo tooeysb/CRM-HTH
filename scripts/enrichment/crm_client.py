@@ -96,6 +96,12 @@ class CRMClient:
         resp.raise_for_status()
         return resp.json()["items"]
 
+    def get_needs_logo_verification(self) -> list[dict]:
+        """Companies with linkedin_url and domain but no logo verification."""
+        resp = self._client.get("/crm/api/reports/needs-logo-verification")
+        resp.raise_for_status()
+        return resp.json()["items"]
+
     def add_contact_to_company(
         self, company_id: str, email: str, name: str | None = None, title: str | None = None
     ) -> dict:

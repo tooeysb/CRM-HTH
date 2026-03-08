@@ -178,6 +178,11 @@ class CompanyUpdateRequest(BaseModel):
     leadership_page_url: str | None = None
     leadership_scraped_at: str | None = None
     is_approved: bool | None = None
+    logo_verified: bool | None = None
+    logo_verified_at: str | None = None
+    logo_hash_website: str | None = None
+    logo_hash_linkedin: str | None = None
+    logo_hash_distance: int | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -2171,6 +2176,47 @@ def report_needs_leadership(
             "domain": c.domain,
             "leadership_page_url": c.leadership_page_url,
             "leadership_scraped_at": serialize_dt(c.leadership_scraped_at),
+        }
+        for c in companies
+    ]
+
+    return {"items": results, "total": len(results)}
+
+
+# ---------------------------------------------------------------------------
+# GET /reports/needs-logo-verification
+# ---------------------------------------------------------------------------
+
+
+@router.get("/reports/needs-logo-verification")
+def report_needs_logo_verification(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_sync_db),
+):
+    """Companies with both linkedin_url and domain but no logo verification yet."""
+    uid = user.id
+
+    companies = (
+        db.query(Company)
+        .filter(
+            Company.user_id == uid,
+            Company.deleted_at.is_(None),
+            Company.linkedin_url.isnot(None),
+            Company.domain.isnot(None),
+            Company.domain != "",
+            Company.logo_verified_at.is_(None),
+        )
+        .order_by(Company.name.asc())
+        .limit(500)
+        .all()
+    )
+
+    results = [
+        {
+            "id": str(c.id),
+            "name": c.name,
+            "domain": c.domain,
+            "linkedin_url": c.linkedin_url,
         }
         for c in companies
     ]
