@@ -90,6 +90,12 @@ class CRMClient:
         resp.raise_for_status()
         return resp.json()
 
+    def get_company_detail(self, company_id: str) -> dict:
+        """GET /crm/api/companies/{id} — full company detail with contacts."""
+        resp = self._client.get(f"/crm/api/companies/{company_id}")
+        resp.raise_for_status()
+        return resp.json()
+
     def get_needs_company_linkedin(self) -> list[dict]:
         """Companies without a LinkedIn company page URL."""
         resp = self._client.get("/crm/api/reports/needs-company-linkedin")
@@ -109,7 +115,12 @@ class CRMClient:
         return resp.json()["items"]
 
     def add_contact_to_company(
-        self, company_id: str, email: str, name: str | None = None, title: str | None = None
+        self,
+        company_id: str,
+        email: str,
+        name: str | None = None,
+        title: str | None = None,
+        contact_source: str | None = None,
     ) -> dict:
         """POST /crm/api/companies/{id}/contacts — add a new contact."""
         body: dict = {"email": email}
@@ -117,6 +128,8 @@ class CRMClient:
             body["name"] = name
         if title:
             body["title"] = title
+        if contact_source:
+            body["contact_source"] = contact_source
         resp = self._client.post(f"/crm/api/companies/{company_id}/contacts", json=body)
         resp.raise_for_status()
         return resp.json()

@@ -132,6 +132,13 @@ class Contact(Base, UUIDMixin, TimestampMixin):
         Text, nullable=True, comment="Notes from enrichment automation"
     )
 
+    contact_source: Mapped[str | None] = mapped_column(
+        String(20),
+        nullable=True,
+        server_default=text("'email'"),
+        comment="How this contact was discovered: email, website, manual",
+    )
+
     source_data: Mapped[dict | None] = mapped_column(
         JSON, nullable=True, comment="Raw imported CRM data for reference"
     )

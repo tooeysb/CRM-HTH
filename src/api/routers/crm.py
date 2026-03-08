@@ -162,6 +162,8 @@ class ContactUpdateRequest(BaseModel):
     linkedin_title_raw: str | None = None
     title_change_detected_at: str | None = None
     previous_title: str | None = None
+    source_data: dict | None = None
+    contact_source: str | None = None
 
 
 class CompanyUpdateRequest(BaseModel):
@@ -272,6 +274,7 @@ def _serialize_contact(contact: Contact, company_name: str | None = None) -> dic
         "previous_title": contact.previous_title,
         "last_post_check_at": serialize_dt(contact.last_post_check_at),
         "last_profile_check_at": serialize_dt(contact.last_profile_check_at),
+        "contact_source": contact.contact_source,
         "created_at": serialize_dt(contact.created_at),
         "updated_at": serialize_dt(contact.updated_at),
     }
@@ -1617,6 +1620,7 @@ class AddContactRequest(BaseModel):
     email: str
     name: str | None = None
     title: str | None = None
+    contact_source: str | None = None
 
     model_config = ConfigDict(extra="forbid")
 
@@ -1680,6 +1684,7 @@ def add_contact_to_company(
         title=body.title,
         email_count=email_count_result or 0,
         account_sources=[],
+        contact_source=body.contact_source or "email",
     )
     db.add(contact)
     db.commit()
