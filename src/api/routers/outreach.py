@@ -2,6 +2,7 @@
 Outreach API routes for news intelligence and draft suggestions.
 """
 
+import re as _re
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
@@ -76,6 +77,44 @@ class DraftUpdateRequest(BaseModel):
 # ---------------------------------------------------------------------------
 # Helper
 # ---------------------------------------------------------------------------
+
+
+# Title tier weights for priority scoring
+_TITLE_TIERS = [
+    (r"\b(ceo|president|owner|principal)\b", 3.0),
+    (r"\b(cfo|coo|cio|cro|cto|chief)\b", 2.5),
+    (r"\b(executive\s+vice|evp|svp|senior\s+vice)\b", 2.0),
+    (r"\b(vp|vice\s+president)\b", 1.5),
+    (r"\b(director)\b", 1.2),
+]
+
+
+def _title_weight(title: str | None) -> float:
+    """Return a multiplier based on executive seniority."""
+    if not title:
+        return 1.0
+    t = title.lower()
+    for pattern, weight in _TITLE_TIERS:
+        if _re.search(pattern, t):
+            return weight
+    return 1.0
+
+
+def _compute_priority_score(
+    contact_email_count: int, title: str | None, company_email_count: int
+) -> float:
+    """Score a suggestion for priority ranking.
+
+    Only contacts with direct email history get a score > 0.
+    Score = email_count * title_weight + small company bonus.
+    """
+    if contact_email_count <= 0:
+        return 0.0
+    tw = _title_weight(title)
+    score = contact_email_count * tw
+    # Small bonus for deep company relationship
+    score += min(company_email_count / 100.0, 1.0)
+    return round(score, 1)
 
 
 def _build_relationship_context(
@@ -156,12 +195,16 @@ def _build_relationship_context(
 
         comp_key = str(info["company_id"]) if info["company_id"] else ""
         co = company_stats.get(comp_key, {})
+        email_ct = info["email_count"]
+        company_ct = co.get("total_emails", 0)
+        title = s.contact.title if s.contact else None
 
         result[cid] = {
-            "contact_email_count": info["email_count"],
-            "company_email_count": co.get("total_emails", 0),
+            "contact_email_count": email_ct,
+            "company_email_count": company_ct,
             "company_contact_count": co.get("contact_count", 0),
             "company_top_contacts": co.get("top_contacts", []),
+            "priority_score": _compute_priority_score(email_ct, title, company_ct),
         }
 
     return result

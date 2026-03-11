@@ -56,11 +56,12 @@ function crmApp() {
             loading: true,
             stats: {},
             items: [],
+            priorityItems: [],
             confirmedItems: [],
             reviewItems: [],
             total: 0,
             page: 1,
-            pageSize: 20,
+            pageSize: 50,
             totalPages: 0,
             filter: 'pending',
             editingId: null,
@@ -967,8 +968,7 @@ function crmApp() {
                 this.outreach.items = suggestions.items || [];
                 this.outreach.total = suggestions.total || 0;
                 this.outreach.totalPages = suggestions.total_pages || 0;
-                this.outreach.confirmedItems = this.outreach.items.filter(s => s.match_confidence !== 'last_name');
-                this.outreach.reviewItems = this.outreach.items.filter(s => s.match_confidence === 'last_name');
+                this._partitionOutreachItems();
             }
             this.outreach.loading = false;
         },
@@ -979,9 +979,18 @@ function crmApp() {
                 this.outreach.items = data.items || [];
                 this.outreach.total = data.total || 0;
                 this.outreach.totalPages = data.total_pages || 0;
-                this.outreach.confirmedItems = this.outreach.items.filter(s => s.match_confidence !== 'last_name');
-                this.outreach.reviewItems = this.outreach.items.filter(s => s.match_confidence === 'last_name');
+                this._partitionOutreachItems();
             }
+        },
+
+        _partitionOutreachItems() {
+            this.outreach.priorityItems = this.outreach.items
+                .filter(s => s.relationship && s.relationship.priority_score > 0 && s.match_confidence !== 'last_name')
+                .sort((a, b) => (b.relationship?.priority_score || 0) - (a.relationship?.priority_score || 0));
+            this.outreach.confirmedItems = this.outreach.items.filter(
+                s => (!s.relationship || s.relationship.priority_score === 0) && s.match_confidence !== 'last_name'
+            );
+            this.outreach.reviewItems = this.outreach.items.filter(s => s.match_confidence === 'last_name');
         },
 
         async loadNewsFeed() {
