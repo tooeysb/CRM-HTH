@@ -6,7 +6,7 @@
     <title>CRM</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
-    <script src="/crm/static/app.js?v=20260310b"></script>
+    <script src="/crm/static/app.js?v=20260311a"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
     <script>
         tailwind.config = {
@@ -917,6 +917,7 @@
                                                 <a x-show="s.news_url" :href="s.news_url" target="_blank"
                                                     class="text-xs text-primary-600 hover:text-primary-800 font-medium truncate" x-text="s.news_title"></a>
                                                 <span x-show="!s.news_url" class="text-xs text-gray-600 font-medium truncate" x-text="s.news_title || 'News article'"></span>
+                                                <span x-show="s.news_published_at" class="text-[10px] text-gray-400 flex-shrink-0" x-text="s.news_published_at ? new Date(s.news_published_at).toLocaleDateString() : ''"></span>
                                             </div>
                                         </template>
                                     </div>
@@ -1023,6 +1024,7 @@
                                                 <a x-show="s.news_url" :href="s.news_url" target="_blank"
                                                     class="text-xs text-primary-600 hover:text-primary-800 font-medium truncate" x-text="s.news_title"></a>
                                                 <span x-show="!s.news_url" class="text-xs text-gray-600 font-medium truncate" x-text="s.news_title || 'News article'"></span>
+                                                <span x-show="s.news_published_at" class="text-[10px] text-gray-400 flex-shrink-0" x-text="s.news_published_at ? new Date(s.news_published_at).toLocaleDateString() : ''"></span>
                                             </div>
                                         </div>
 

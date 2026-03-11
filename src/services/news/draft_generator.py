@@ -7,7 +7,7 @@ existing voice profile system.
 """
 
 import re
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.orm import Session, joinedload
 
@@ -200,6 +200,9 @@ class NewsDraftGeneratorService:
         """
         threshold = settings.news_relevance_threshold
 
+        # Only generate drafts for articles published in the last 90 days
+        recency_cutoff = datetime.now(UTC) - timedelta(days=90)
+
         # Find analyzed items that haven't been actioned
         items = (
             self.db.query(CompanyNewsItem)
@@ -207,6 +210,7 @@ class NewsDraftGeneratorService:
             .filter(
                 CompanyNewsItem.user_id == user_id,
                 CompanyNewsItem.status == "analyzed",
+                CompanyNewsItem.published_at >= recency_cutoff,
             )
             .all()
         )

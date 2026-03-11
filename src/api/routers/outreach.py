@@ -8,7 +8,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import func
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, contains_eager, joinedload
 
 from src.api.middleware.auth import get_current_user
 from src.core.database import get_sync_db
@@ -21,7 +21,7 @@ from src.models.user import User
 router = APIRouter()
 
 NEWS_SORTABLE_COLUMNS = frozenset({"published_at", "created_at", "status", "title"})
-SUGGESTION_SORTABLE_COLUMNS = frozenset({"created_at", "status", "generated_at"})
+SUGGESTION_SORTABLE_COLUMNS = frozenset({"created_at", "status", "generated_at", "published_at"})
 
 
 # ---------------------------------------------------------------------------
@@ -57,6 +57,7 @@ class DraftSuggestionResponse(BaseModel):
     news_title: str | None = None
     news_category: str | None = None
     news_url: str | None = None
+    news_published_at: str | None = None
     subject: str
     body: str
     status: str
@@ -120,6 +121,7 @@ def _serialize_suggestion(s: DraftSuggestion) -> dict:
         "news_title": news_item.title if news_item else None,
         "news_category": analysis.get("category") if analysis else None,
         "news_url": news_item.source_url if news_item else None,
+        "news_published_at": serialize_dt(news_item.published_at) if news_item else None,
         "subject": s.subject,
         "body": s.body,
         "status": s.status,
@@ -289,19 +291,22 @@ def list_suggestions(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     status: str = "pending",
-    sort_by: str = "created_at",
+    sort_by: str = "published_at",
     sort_dir: str = "desc",
     user: User = Depends(get_current_user),
     db: Session = Depends(get_sync_db),
 ):
-    """Paginated draft suggestions."""
+    """Paginated draft suggestions, newest articles first by default."""
     if sort_by not in SUGGESTION_SORTABLE_COLUMNS:
         raise HTTPException(400, f"Invalid sort column: {sort_by}")
 
+    # Explicit join for published_at sort; contains_eager tells SQLAlchemy
+    # the join satisfies the news_item relationship (avoids double join).
     query = (
         db.query(DraftSuggestion)
+        .outerjoin(CompanyNewsItem, DraftSuggestion.news_item_id == CompanyNewsItem.id)
         .options(
-            joinedload(DraftSuggestion.news_item).joinedload(CompanyNewsItem.company),
+            contains_eager(DraftSuggestion.news_item).joinedload(CompanyNewsItem.company),
             joinedload(DraftSuggestion.contact).joinedload(Contact.company),
         )
         .filter(DraftSuggestion.user_id == user.id)
@@ -310,8 +315,17 @@ def list_suggestions(
     if status != "all":
         query = query.filter(DraftSuggestion.status == status)
 
-    col = getattr(DraftSuggestion, sort_by)
-    query = query.order_by(col.desc() if sort_dir == "desc" else col.asc())
+    # Sort — published_at lives on the joined CompanyNewsItem table
+    if sort_by == "published_at":
+        order = (
+            CompanyNewsItem.published_at.desc().nullslast()
+            if sort_dir == "desc"
+            else CompanyNewsItem.published_at.asc().nullsfirst()
+        )
+        query = query.order_by(order)
+    else:
+        col = getattr(DraftSuggestion, sort_by)
+        query = query.order_by(col.desc() if sort_dir == "desc" else col.asc())
 
     total = (
         db.query(func.count(DraftSuggestion.id))
