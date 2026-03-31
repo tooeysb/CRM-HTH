@@ -21,9 +21,9 @@ sys.path.insert(0, str(Path(__file__).parent))
 from src.core.config import settings
 from src.core.database import SyncSessionLocal
 from src.models.user import User
+from src.services.obsidian.relationship_vault import RelationshipVaultGenerator
 from src.services.relationships.contact_discovery import discover_contacts
 from src.services.relationships.profiler import profile_contacts_batch
-from src.services.obsidian.relationship_vault import RelationshipVaultGenerator
 
 logging.basicConfig(
     level=logging.INFO,

@@ -163,7 +163,9 @@ def main():
         # Filter to single tab if requested
         if args.tab:
             if args.tab not in tabs_data:
-                logger.error(f"Tab '{args.tab}' not found. Available tabs: {list(tabs_data.keys())}")
+                logger.error(
+                    f"Tab '{args.tab}' not found. Available tabs: {list(tabs_data.keys())}"
+                )
                 sys.exit(1)
             tabs_data = {args.tab: tabs_data[args.tab]}
 

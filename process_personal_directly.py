@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
 """Directly process the 700 queued personal account emails, bypassing Celery."""
+
 import json
 import uuid
 from datetime import datetime
+
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.orm import sessionmaker
 
 from src.core.config import settings
-from src.models import Email, EmailQueue, GmailAccount
 from src.integrations.gmail.client import GmailClient
+from src.models import Email, EmailQueue, GmailAccount
 
 # Database setup
 engine = create_engine(settings.database_url)
@@ -17,18 +19,14 @@ Session = sessionmaker(bind=engine)
 db = Session()
 
 # Get personal account
-account = db.query(GmailAccount).filter(
-    GmailAccount.account_label == 'personal'
-).first()
+account = db.query(GmailAccount).filter(GmailAccount.account_label == "personal").first()
 
 if not account:
     print("❌ Personal account not found")
     exit(1)
 
 # Get all queued IDs for personal account
-queued_ids = db.query(EmailQueue.gmail_message_id).filter(
-    EmailQueue.account_id == account.id
-).all()
+queued_ids = db.query(EmailQueue.gmail_message_id).filter(EmailQueue.account_id == account.id).all()
 
 message_ids = [row[0] for row in queued_ids]
 
@@ -47,8 +45,10 @@ batch_size = 100
 total_processed = 0
 
 for i in range(0, len(message_ids), batch_size):
-    batch = message_ids[i:i + batch_size]
-    print(f"\n🔄 Processing batch {i//batch_size + 1}/{(len(message_ids) + batch_size - 1)//batch_size} ({len(batch)} emails)...")
+    batch = message_ids[i : i + batch_size]
+    print(
+        f"\n🔄 Processing batch {i//batch_size + 1}/{(len(message_ids) + batch_size - 1)//batch_size} ({len(batch)} emails)..."
+    )
 
     try:
         # Fetch full messages
@@ -88,8 +88,7 @@ for i in range(0, len(message_ids), batch_size):
 
         # Remove from queue
         db.query(EmailQueue).filter(
-            EmailQueue.account_id == account.id,
-            EmailQueue.gmail_message_id.in_(batch)
+            EmailQueue.account_id == account.id, EmailQueue.gmail_message_id.in_(batch)
         ).delete(synchronize_session=False)
         db.commit()
         print(f"  🗑️  Removed {len(batch)} from queue")
@@ -99,6 +98,6 @@ for i in range(0, len(message_ids), batch_size):
         continue
 
 print(f"\n✅ DONE! Processed {total_processed} emails for {account.account_email}")
-print(f"🗑️  Cleared queue")
+print("🗑️  Cleared queue")
 
 db.close()

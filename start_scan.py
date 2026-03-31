@@ -15,10 +15,7 @@ import httpx
 
 async def start_scan():
     """Start a new Gmail scan."""
-    api_url = os.getenv(
-        "APP_URL",
-        "https://crm-hth-0f0e9a31256d.herokuapp.com"
-    )
+    api_url = os.getenv("APP_URL", "https://crm-hth-0f0e9a31256d.herokuapp.com")
     user_id = os.getenv("USER_ID", "d4475ca3-0ddc-4ea0-ac89-95ae7fed1e31")
 
     payload = {
@@ -26,7 +23,7 @@ async def start_scan():
         "account_labels": ["procore-main", "procore-private", "personal"],
     }
 
-    print(f"🚀 Starting Gmail scan...")
+    print("🚀 Starting Gmail scan...")
     print(f"   API: {api_url}")
     print(f"   User: {user_id}")
     print(f"   Accounts: {', '.join(payload['account_labels'])}")
@@ -42,13 +39,13 @@ async def start_scan():
             if response.status_code == 200:
                 data = response.json()
                 job_id = data.get("job_id")
-                print(f"✅ Scan started successfully!")
+                print("✅ Scan started successfully!")
                 print(f"   Job ID: {job_id}")
                 print()
-                print(f"Monitor progress with: ./monitor_scan.sh")
+                print("Monitor progress with: ./monitor_scan.sh")
                 return 0
             else:
-                print(f"❌ Failed to start scan")
+                print("❌ Failed to start scan")
                 print(f"   Status: {response.status_code}")
                 print(f"   Response: {response.text}")
                 return 1

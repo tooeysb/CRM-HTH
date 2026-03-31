@@ -14,6 +14,7 @@ import urllib.request
 
 sys.path.insert(0, ".")
 from sqlalchemy import create_engine, text
+
 from src.core.config import settings
 
 PORT = 8765
@@ -26,8 +27,8 @@ _engine = create_engine(settings.database_url, pool_pre_ping=True, pool_size=1, 
 _prev_done: int | None = None
 _prev_time: float | None = None
 _prev_account_done: dict[str, int] = {}
-_last_rates: dict[str, int] = {}       # cached per-account rates
-_last_total_rate: int = 0               # cached total rate
+_last_rates: dict[str, int] = {}  # cached per-account rates
+_last_total_rate: int = 0  # cached total rate
 _last_total_eta: float | None = None
 _last_account_etas: dict[str, float | None] = {}
 
@@ -70,21 +71,25 @@ def _get_backfill_stats():
             delta = done - _prev_account_done[email]
             acct_rate = max(0, round(delta / elapsed * 60))
             _last_rates[email] = acct_rate
-            _last_account_etas[email] = round(remaining / acct_rate / 60, 1) if acct_rate > 0 else None
+            _last_account_etas[email] = (
+                round(remaining / acct_rate / 60, 1) if acct_rate > 0 else None
+            )
 
         acct_rate = _last_rates.get(email, 0)
         acct_eta = _last_account_etas.get(email)
 
-        accounts.append({
-            "email": email,
-            "done": done,
-            "fetching": fetching,
-            "remaining": remaining,
-            "total": total,
-            "pct": round(pct, 1),
-            "rate_per_min": acct_rate,
-            "eta_hours": acct_eta,
-        })
+        accounts.append(
+            {
+                "email": email,
+                "done": done,
+                "fetching": fetching,
+                "remaining": remaining,
+                "total": total,
+                "pct": round(pct, 1),
+                "rate_per_min": acct_rate,
+                "eta_hours": acct_eta,
+            }
+        )
         total_done += done
         total_fetching += fetching
         total_remaining += remaining
@@ -95,7 +100,9 @@ def _get_backfill_stats():
         if _prev_done is not None:
             delta = total_done - _prev_done
             _last_total_rate = max(0, round(delta / elapsed * 60))
-            _last_total_eta = round(total_remaining / _last_total_rate / 60, 1) if _last_total_rate > 0 else None
+            _last_total_eta = (
+                round(total_remaining / _last_total_rate / 60, 1) if _last_total_rate > 0 else None
+            )
 
         # Update prev snapshots for next interval
         _prev_done = total_done
@@ -123,12 +130,12 @@ def _get_backfill_stats():
 
 class WidgetHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
-        if self.path == '/api/stats':
+        if self.path == "/api/stats":
             self._proxy_heroku()
-        elif self.path == '/api/backfill':
+        elif self.path == "/api/backfill":
             self._backfill_stats()
-        elif self.path in ('/', '/widget'):
-            self.path = '/desktop_widget_local.html'
+        elif self.path in ("/", "/widget"):
+            self.path = "/desktop_widget_local.html"
             return super().do_GET()
         else:
             return super().do_GET()
@@ -153,8 +160,8 @@ class WidgetHandler(http.server.SimpleHTTPRequestHandler):
 
     def _json_response(self, code, data):
         self.send_response(code)
-        self.send_header('Content-Type', 'application/json')
-        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.wfile.write(data if isinstance(data, bytes) else data.encode())
 
@@ -166,7 +173,7 @@ def main():
     socketserver.TCPServer.allow_reuse_address = True
     with socketserver.TCPServer(("", PORT), WidgetHandler) as httpd:
         print(f"Widget Server Running on http://localhost:{PORT}/widget")
-        print(f"Auto-refreshes every 10 seconds")
+        print("Auto-refreshes every 10 seconds")
         try:
             httpd.serve_forever()
         except KeyboardInterrupt:

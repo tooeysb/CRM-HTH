@@ -5,19 +5,16 @@ This runs theme detection and vault generation on emails already fetched.
 
 import os
 import uuid
-from datetime import datetime
 from collections import defaultdict
+from datetime import datetime
 
 from dotenv import load_dotenv
-from sqlalchemy import create_engine, func
+from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from src.core.config import settings
-from src.integrations.claude.batch_processor import ThemeBatchProcessor
-from src.models import Email, EmailTag, GmailAccount, User
+from src.models import Email, EmailTag, GmailAccount
 from src.services.obsidian.note_generator import NoteGenerator
 from src.services.obsidian.vault_manager import ObsidianVaultManager
-from src.services.theme_detection.prompt_template import generate_tags
 
 load_dotenv()
 
@@ -57,9 +54,7 @@ def process_existing_emails():
             db.query(EmailTag).filter(EmailTag.email_id == email.id).delete()
 
             # Get account label
-            account = db.query(GmailAccount).filter(
-                GmailAccount.id == email.account_id
-            ).first()
+            account = db.query(GmailAccount).filter(GmailAccount.id == email.account_id).first()
 
             # Simple tags based on email content
             tags = []
@@ -246,14 +241,15 @@ created_at: {datetime.utcnow().isoformat()}
         print("📊 Summary:")
         print(f"   - {len(emails):,} email notes")
         print(f"   - {len(emails_by_sender)} contact notes")
-        print(f"\n🎯 Next steps:")
-        print(f"   1. Open Obsidian")
+        print("\n🎯 Next steps:")
+        print("   1. Open Obsidian")
         print(f"   2. Open vault: {vault_path}")
-        print(f"   3. Explore your emails!")
+        print("   3. Explore your emails!")
 
     except Exception as e:
         print(f"\n❌ Error: {e}")
         import traceback
+
         traceback.print_exc()
 
     finally:

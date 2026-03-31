@@ -45,7 +45,7 @@ class EmailWidget:
             text="📧 Email Processing",
             font=("Helvetica", 18, "bold"),
             bg="#667eea",
-            fg="white"
+            fg="white",
         )
         self.title_label.pack(pady=(0, 15))
 
@@ -59,16 +59,12 @@ class EmailWidget:
             text="TOTAL EMAILS",
             font=("Helvetica", 10, "bold"),
             bg="white",
-            fg="#718096"
+            fg="#718096",
         )
         self.total_label.pack(anchor="w", pady=(0, 5))
 
         self.total_value = tk.Label(
-            self.stats_frame,
-            text="—",
-            font=("Helvetica", 36, "bold"),
-            bg="white",
-            fg="#2d3748"
+            self.stats_frame, text="—", font=("Helvetica", 36, "bold"), bg="white", fg="#2d3748"
         )
         self.total_value.pack(anchor="w", pady=(0, 15))
 
@@ -78,16 +74,12 @@ class EmailWidget:
             text="MINUTES SINCE LAST",
             font=("Helvetica", 10, "bold"),
             bg="white",
-            fg="#718096"
+            fg="#718096",
         )
         self.minutes_label.pack(anchor="w", pady=(0, 5))
 
         self.minutes_value = tk.Label(
-            self.stats_frame,
-            text="—",
-            font=("Helvetica", 36, "bold"),
-            bg="white",
-            fg="#2d3748"
+            self.stats_frame, text="—", font=("Helvetica", 36, "bold"), bg="white", fg="#2d3748"
         )
         self.minutes_value.pack(anchor="w", pady=(0, 15))
 
@@ -96,30 +88,18 @@ class EmailWidget:
         self.status_frame.pack(fill="x")
 
         self.status_dot = tk.Label(
-            self.status_frame,
-            text="●",
-            font=("Helvetica", 16),
-            bg="#f7fafc",
-            fg="#a0aec0"
+            self.status_frame, text="●", font=("Helvetica", 16), bg="#f7fafc", fg="#a0aec0"
         )
         self.status_dot.pack(side="left", padx=(0, 8))
 
         self.status_text = tk.Label(
-            self.status_frame,
-            text="Loading...",
-            font=("Helvetica", 11),
-            bg="#f7fafc",
-            fg="#4a5568"
+            self.status_frame, text="Loading...", font=("Helvetica", 11), bg="#f7fafc", fg="#4a5568"
         )
         self.status_text.pack(side="left")
 
         # Last updated
         self.updated_label = tk.Label(
-            self.container,
-            text="Updated just now",
-            font=("Helvetica", 9),
-            bg="#667eea",
-            fg="white"
+            self.container, text="Updated just now", font=("Helvetica", 9), bg="#667eea", fg="white"
         )
         self.updated_label.pack(pady=(10, 0))
 
@@ -133,7 +113,7 @@ class EmailWidget:
             fg="white",
             bd=0,
             highlightthickness=0,
-            cursor="hand2"
+            cursor="hand2",
         )
         self.close_button.place(x=10, y=10)
 

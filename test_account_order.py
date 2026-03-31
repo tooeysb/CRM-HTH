@@ -5,6 +5,7 @@ Which corresponds to: tooey@hth-corp.com → 2e@procore.com → tooey@procore.co
 """
 
 import os
+
 from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -16,6 +17,7 @@ load_dotenv()
 # Database connection
 engine = create_engine(os.environ["DATABASE_URL"])
 SessionLocal = sessionmaker(bind=engine)
+
 
 def test_account_order():
     """Test the account processing order."""
@@ -32,12 +34,10 @@ def test_account_order():
         for i, label in enumerate(account_labels, 1):
             print(f"   {i}. {label}")
 
-        print(f"\n🔎 Checking actual accounts in database:\n")
+        print("\n🔎 Checking actual accounts in database:\n")
 
         for i, label in enumerate(account_labels, 1):
-            account = db.query(GmailAccount).filter(
-                GmailAccount.account_label == label
-            ).first()
+            account = db.query(GmailAccount).filter(GmailAccount.account_label == label).first()
 
             if account:
                 print(f"   {i}. ✅ {label}")
@@ -56,10 +56,12 @@ def test_account_order():
     except Exception as e:
         print(f"\n❌ Error: {e}")
         import traceback
+
         traceback.print_exc()
 
     finally:
         db.close()
+
 
 if __name__ == "__main__":
     test_account_order()

@@ -6,8 +6,8 @@ Create Date: 2026-03-01 00:00:00.000000
 
 """
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
@@ -29,9 +29,7 @@ def upgrade() -> None:
         ),
         sa.Column("contact_email", sa.String(255), nullable=False),
         sa.Column("contact_name", sa.String(255), nullable=True),
-        sa.Column(
-            "relationship_type", sa.String(50), nullable=False, server_default="unknown"
-        ),
+        sa.Column("relationship_type", sa.String(50), nullable=False, server_default="unknown"),
         sa.Column(
             "account_sources",
             postgresql.ARRAY(sa.String),
@@ -66,9 +64,7 @@ def upgrade() -> None:
     )
 
     # Indexes
-    op.create_index(
-        "ix_relationship_profiles_user_id", "relationship_profiles", ["user_id"]
-    )
+    op.create_index("ix_relationship_profiles_user_id", "relationship_profiles", ["user_id"])
     op.create_index(
         "ix_relationship_profiles_contact_email",
         "relationship_profiles",

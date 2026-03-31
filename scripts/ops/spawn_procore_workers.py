@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Spawn Phase 2 workers for procore-main account to process 833K queued emails."""
+
 import os
 
 from celery import Celery

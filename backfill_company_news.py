@@ -18,7 +18,7 @@ import argparse
 import re
 import time
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from urllib.parse import quote_plus
 
 import feedparser
@@ -179,7 +179,7 @@ def backfill_company(
     # Compute date cutoff for filtering
     date_cutoff = None
     if max_age_days:
-        date_cutoff = datetime.now(timezone.utc) - timedelta(days=max_age_days)
+        date_cutoff = datetime.now(UTC) - timedelta(days=max_age_days)
 
     stats = {
         "searched": True,
@@ -224,7 +224,7 @@ def backfill_company(
 
         # Enforce date cutoff (skip articles older than max_age_days)
         if date_cutoff and published_at:
-            pub_utc = published_at.astimezone(timezone.utc) if published_at.tzinfo else published_at
+            pub_utc = published_at.astimezone(UTC) if published_at.tzinfo else published_at
             if pub_utc < date_cutoff:
                 stats["skipped_too_old"] += 1
                 continue

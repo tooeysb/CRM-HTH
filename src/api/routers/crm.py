@@ -740,8 +740,7 @@ def enrich_contact_title(
 
     # Fetch several recent emails, pick longest body (most likely to have a signature)
     sig_rows = db.execute(
-        text(
-            """
+        text("""
             SELECT sender_name, COALESCE(body, summary) AS sig_text
             FROM emails
             WHERE user_id = :uid
@@ -749,8 +748,7 @@ def enrich_contact_title(
               AND LENGTH(COALESCE(body, summary)) > 100
             ORDER BY date DESC
             LIMIT 5
-            """
-        ),
+            """),
         {"uid": str(uid), "contact_email": contact.email.lower()},
     ).fetchall()
 
@@ -1577,8 +1575,7 @@ def get_discovered_contacts(
     signatures: dict[str, tuple[str, str]] = {}
     if sender_emails:
         sig_rows = db.execute(
-            text(
-                """
+            text("""
                 SELECT DISTINCT ON (LOWER(sender_email))
                        sender_email, body
                 FROM emails
@@ -1587,8 +1584,7 @@ def get_discovered_contacts(
                   AND body IS NOT NULL
                   AND body != ''
                 ORDER BY LOWER(sender_email), date DESC
-            """
-            ),
+            """),
             {"uid": str(uid), "emails": sender_emails},
         ).fetchall()
 

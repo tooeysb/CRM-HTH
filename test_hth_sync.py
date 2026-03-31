@@ -2,6 +2,7 @@
 Simple test script to verify hth-corp email syncing works.
 Fetches just 10 emails to test the complete flow.
 """
+
 import json
 import uuid
 from datetime import datetime
@@ -18,15 +19,18 @@ from src.models import Email, GmailAccount
 engine = create_engine(settings.database_url)
 SessionLocal = sessionmaker(bind=engine)
 
+
 def test_sync():
     """Test syncing 10 emails from hth-corp account."""
     db = SessionLocal()
 
     try:
         # Get hth-corp account
-        account = db.query(GmailAccount).filter(
-            GmailAccount.account_email == 'tooey@hth-corp.com'
-        ).first()
+        account = (
+            db.query(GmailAccount)
+            .filter(GmailAccount.account_email == "tooey@hth-corp.com")
+            .first()
+        )
 
         if not account:
             print("❌ Account not found")
@@ -53,10 +57,7 @@ def test_sync():
 
         # Fetch just 10 message IDs
         print("\n📥 Fetching 10 message IDs...")
-        message_ids, _ = gmail_client.fetch_emails_chunked(
-            batch_size=10,
-            query="in:anywhere"
-        )
+        message_ids, _ = gmail_client.fetch_emails_chunked(batch_size=10, query="in:anywhere")
         print(f"✅ Fetched {len(message_ids)} message IDs")
 
         # Close DB before fetching (test the fix)
@@ -104,23 +105,24 @@ def test_sync():
         )
         result = db.execute(stmt, emails_to_insert)
         db.commit()
-        print(f"✅ Inserted successfully")
+        print("✅ Inserted successfully")
 
         # Verify count
         from sqlalchemy import func
-        count = db.query(func.count(Email.id)).filter(
-            Email.account_id == account.id
-        ).scalar()
+
+        count = db.query(func.count(Email.id)).filter(Email.account_id == account.id).scalar()
         print(f"\n📊 Total emails in database for hth-corp: {count}")
         print("\n🎉 TEST PASSED!")
 
     except Exception as e:
         print(f"\n❌ ERROR: {e}")
         import traceback
+
         traceback.print_exc()
         db.rollback()
     finally:
         db.close()
+
 
 if __name__ == "__main__":
     test_sync()

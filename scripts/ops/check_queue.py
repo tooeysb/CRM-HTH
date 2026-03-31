@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Check EmailQueue status for procore-main account."""
+
 import sys
 
 from sqlalchemy import create_engine, func

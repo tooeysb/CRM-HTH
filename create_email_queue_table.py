@@ -4,7 +4,7 @@
 from sqlalchemy import create_engine
 
 from src.core.config import settings
-from src.models import Base, EmailQueue
+from src.models import EmailQueue
 
 if __name__ == "__main__":
     print("Creating EmailQueue table...")

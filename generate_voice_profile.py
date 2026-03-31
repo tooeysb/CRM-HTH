@@ -34,7 +34,7 @@ def main():
             sample_size=args.sample_size,
         )
 
-        print(f"Voice profile generated successfully!")
+        print("Voice profile generated successfully!")
         print(f"  Profile ID: {profile.id}")
         print(f"  Profile name: {profile.profile_name}")
         print(f"  Emails analyzed: {profile.sample_count}")
@@ -42,7 +42,8 @@ def main():
 
         if profile.profile_data:
             import json
-            print(f"\nProfile preview:")
+
+            print("\nProfile preview:")
             print(json.dumps(profile.profile_data, indent=2)[:2000])
 
     except Exception as e:

@@ -15,6 +15,7 @@ Key functions:
 Run as: python monitor_scan.py
 Or as Heroku dyno: monitor: python monitor_scan.py
 """
+
 import os
 import time
 from datetime import datetime, timedelta
@@ -26,7 +27,7 @@ from sqlalchemy.orm import sessionmaker
 
 from src.core.config import settings
 from src.core.logging import get_logger
-from src.models import Email, EmailQueue, GmailAccount, GuardianEvent
+from src.models import EmailQueue, GmailAccount, GuardianEvent
 
 logger = get_logger(__name__)
 
@@ -135,11 +136,7 @@ def get_account_user_id(account_email: str) -> str | None:
     """Get user_id for an account."""
     db = SessionLocal()
     try:
-        account = (
-            db.query(GmailAccount)
-            .filter(GmailAccount.account_email == account_email)
-            .first()
-        )
+        account = db.query(GmailAccount).filter(GmailAccount.account_email == account_email).first()
         return str(account.user_id) if account else None
     except Exception as e:
         logger.error(f"Error fetching user_id for {account_email}: {e}")
@@ -196,9 +193,7 @@ def check_queue_and_spawn_workers():
         )
         if stale_count > 0:
             db.commit()
-            logger.info(
-                f"Recovered {stale_count} stale queue claims (claimed >15 min ago)"
-            )
+            logger.info(f"Recovered {stale_count} stale queue claims (claimed >15 min ago)")
             log_event(
                 "stale_claims_recovered",
                 f"Recovered {stale_count} stale queue claims",
@@ -294,9 +289,7 @@ def restart_account_sync(account_email: str, reason: str):
         db = SessionLocal()
         try:
             account = (
-                db.query(GmailAccount)
-                .filter(GmailAccount.account_email == account_email)
-                .first()
+                db.query(GmailAccount).filter(GmailAccount.account_email == account_email).first()
             )
             if account:
                 unclaimed = (
@@ -345,11 +338,15 @@ def monitor_loop():
     logger.info("=" * 80)
 
     # Log monitor start
-    log_event("monitor_started", "Email sync monitor started", metadata={
-        "check_interval": CHECK_INTERVAL_SECONDS,
-        "stall_threshold": STALL_THRESHOLD_MINUTES,
-        "min_expected_rate": MIN_EXPECTED_RATE,
-    })
+    log_event(
+        "monitor_started",
+        "Email sync monitor started",
+        metadata={
+            "check_interval": CHECK_INTERVAL_SECONDS,
+            "stall_threshold": STALL_THRESHOLD_MINUTES,
+            "min_expected_rate": MIN_EXPECTED_RATE,
+        },
+    )
 
     # Initialize monitors for each account
     monitors = {}
@@ -421,9 +418,9 @@ def monitor_loop():
                         f"Account stalled: {result['reason']}",
                         account_email=account_email,
                         metadata={
-                            "emails_per_min": result['emails_per_min'],
-                            "consecutive_stalls": result['consecutive_stalls'],
-                        }
+                            "emails_per_min": result["emails_per_min"],
+                            "consecutive_stalls": result["consecutive_stalls"],
+                        },
                     )
 
                     if restart_account_sync(account_email, result["reason"]):
@@ -435,7 +432,7 @@ def monitor_loop():
                             "scan_restarted",
                             f"Successfully restarted sync for {account_email}",
                             account_email=account_email,
-                            metadata={"restart_count": monitor.restart_count}
+                            metadata={"restart_count": monitor.restart_count},
                         )
                     else:
                         logger.error(f"❌ [{account_email}] Restart failed")
@@ -455,7 +452,7 @@ def monitor_loop():
                         "slow_processing",
                         f"Account processing slowly: {result['reason']}",
                         account_email=account_email,
-                        metadata={"emails_per_min": result['emails_per_min']}
+                        metadata={"emails_per_min": result["emails_per_min"]},
                     )
 
             # Wait before next check

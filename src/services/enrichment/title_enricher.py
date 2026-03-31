@@ -90,8 +90,7 @@ class BatchTitleEnricher:
 
         # Fetch most recent email body for each contact (as sender)
         sig_rows = self.db.execute(
-            text(
-                """
+            text("""
                 SELECT DISTINCT ON (LOWER(sender_email))
                        sender_email, body
                 FROM emails
@@ -100,8 +99,7 @@ class BatchTitleEnricher:
                   AND body IS NOT NULL
                   AND LENGTH(body) > 50
                 ORDER BY LOWER(sender_email), date DESC
-                """
-            ),
+                """),
             {"uid": str(self.user_id), "emails": sender_emails},
         ).fetchall()
 

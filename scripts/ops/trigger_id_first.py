@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Trigger ID-first scan for procore-main account."""
+
 import os
 
 from celery import Celery

@@ -3,7 +3,6 @@ Quick Obsidian vault generator - skips database tagging, creates files directly.
 """
 
 import os
-from datetime import datetime
 from collections import defaultdict
 from pathlib import Path
 
@@ -54,7 +53,7 @@ def quick_generate_vault():
         emails_dir = vault_path / "Emails"
         emails_dir.mkdir(exist_ok=True)
 
-        print(f"✅ Vault structure created\n")
+        print("✅ Vault structure created\n")
 
         # Group emails by sender
         print("👥 Processing contacts...")
@@ -167,6 +166,7 @@ tags: {tags}
     except Exception as e:
         print(f"\n❌ Error: {e}")
         import traceback
+
         traceback.print_exc()
 
     finally:
