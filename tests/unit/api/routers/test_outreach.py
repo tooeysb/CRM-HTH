@@ -139,14 +139,31 @@ class TestOutreachSuggestions:
 class TestUpdateSuggestion:
     """PATCH /crm/api/outreach/suggestions/{id} endpoint."""
 
-    def test_update_nonexistent_returns_404(self, authed_client):
+    def test_update_nonexistent_returns_404(self):
         import uuid
 
-        response = authed_client.patch(
+        # Build a mock DB where get_current_user succeeds (db.query().first()
+        # returns mock_user) but the DraftSuggestion lookup via
+        # db.query().filter().first() returns None → 404.
+        mock_user = MagicMock(spec=User)
+        mock_user.id = UUID("d4475ca3-0ddc-4ea0-ac89-95ae7fed1e31")
+        mock_user.email = "test@example.com"
+        mock_user.name = "Test User"
+        db = _make_mock_db(mock_user=mock_user)
+        db.query.return_value.filter.return_value.first.return_value = None
+
+        def override():
+            yield db
+
+        app.dependency_overrides[get_sync_db] = override
+        client = TestClient(app, headers={"X-API-Key": settings.secret_key})
+
+        response = client.patch(
             f"/crm/api/outreach/suggestions/{uuid.uuid4()}",
             json={"status": "sent"},
         )
         assert response.status_code == 404
+        app.dependency_overrides.clear()
 
 
 class TestTitleWeight:

@@ -81,10 +81,10 @@ class DraftUpdateRequest(BaseModel):
 
 # Title tier weights for priority scoring
 _TITLE_TIERS = [
-    (r"\b(ceo|president|owner|principal)\b", 3.0),
-    (r"\b(cfo|coo|cio|cro|cto|chief)\b", 2.5),
     (r"\b(executive\s+vice|evp|svp|senior\s+vice)\b", 2.0),
     (r"\b(vp|vice\s+president)\b", 1.5),
+    (r"\b(ceo|president|owner|principal)\b", 3.0),
+    (r"\b(cfo|coo|cio|cro|cto|chief)\b", 2.5),
     (r"\b(director)\b", 1.2),
 ]
 

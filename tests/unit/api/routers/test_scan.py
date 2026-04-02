@@ -109,7 +109,8 @@ class TestJobStatus:
     def test_status_pending_from_celery(self, mock_async_result, mock_celery_app, authed_client):
         """When job not in DB, falls back to Celery PENDING state."""
         client, db = authed_client
-        # .first() returns None -> no job in DB
+        # Override .first() to return None so the SyncJob lookup misses
+        db.query.return_value.filter.return_value.first.return_value = None
         mock_result = MagicMock()
         mock_result.state = "PENDING"
         mock_async_result.return_value = mock_result
@@ -123,6 +124,8 @@ class TestJobStatus:
     def test_status_success_from_celery(self, mock_async_result, mock_celery_app, authed_client):
         """Celery SUCCESS state returns completed status."""
         client, db = authed_client
+        # Override .first() to return None so the SyncJob lookup misses
+        db.query.return_value.filter.return_value.first.return_value = None
         mock_result = MagicMock()
         mock_result.state = "SUCCESS"
         mock_result.result = {"emails_processed": 100, "contacts_processed": 50}
@@ -139,6 +142,8 @@ class TestJobStatus:
     def test_status_failure_from_celery(self, mock_async_result, mock_celery_app, authed_client):
         """Celery FAILURE state returns failed status with error message."""
         client, db = authed_client
+        # Override .first() to return None so the SyncJob lookup misses
+        db.query.return_value.filter.return_value.first.return_value = None
         mock_result = MagicMock()
         mock_result.state = "FAILURE"
         mock_result.info = Exception("Worker crashed")
@@ -157,6 +162,8 @@ class TestCancelJob:
     def test_cancel_nonexistent_job_returns_404(self, authed_client):
         """Cancelling a non-existent job returns 404."""
         client, db = authed_client
+        # Override .first() to return None so the SyncJob lookup misses
+        db.query.return_value.filter.return_value.first.return_value = None
         response = client.post(f"/scan/cancel/{uuid.uuid4()}")
         assert response.status_code == 404
 
@@ -167,5 +174,7 @@ class TestJobResults:
     def test_results_nonexistent_job_returns_404(self, authed_client):
         """Getting results for non-existent job returns 404."""
         client, db = authed_client
+        # Override .first() to return None so the SyncJob lookup misses
+        db.query.return_value.filter.return_value.first.return_value = None
         response = client.get(f"/scan/results/{uuid.uuid4()}")
         assert response.status_code == 404

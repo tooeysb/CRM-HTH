@@ -66,7 +66,7 @@ class TestComputeContactScore:
         """Direct correspondents should score +50 higher."""
         score_direct = compute_contact_score(10, None, is_direct=True)
         score_indirect = compute_contact_score(10, None, is_direct=False)
-        assert score_direct - score_indirect == 50.0
+        assert abs(score_direct - score_indirect - 50.0) < 1e-9
 
     def test_naive_datetime_handled(self):
         """Naive datetime (no tzinfo) should be handled without error."""
