@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from src.api.middleware.auth import require_api_key
 from src.core.config import settings
 from src.core.database import get_sync_db
 from src.core.logging import get_logger
@@ -60,7 +61,7 @@ class JobStatusResponse(BaseModel):
     duration_seconds: int | None
 
 
-@router.post("/start", response_model=StartScanResponse)
+@router.post("/start", response_model=StartScanResponse, dependencies=[Depends(require_api_key)])
 async def start_scan(
     request: StartScanRequest, db: Session = Depends(get_sync_db)
 ) -> StartScanResponse:
@@ -138,7 +139,9 @@ async def start_scan(
         raise HTTPException(status_code=500, detail="Failed to start scan") from None
 
 
-@router.get("/status/{job_id}", response_model=JobStatusResponse)
+@router.get(
+    "/status/{job_id}", response_model=JobStatusResponse, dependencies=[Depends(require_api_key)]
+)
 async def get_job_status(job_id: str, db: Session = Depends(get_sync_db)) -> JobStatusResponse:
     """
     Get status of a scan job.
@@ -259,7 +262,7 @@ async def get_job_status(job_id: str, db: Session = Depends(get_sync_db)) -> Job
         raise HTTPException(status_code=404, detail="Job not found") from None
 
 
-@router.post("/cancel/{job_id}")
+@router.post("/cancel/{job_id}", dependencies=[Depends(require_api_key)])
 async def cancel_job(job_id: str, db: Session = Depends(get_sync_db)) -> dict[str, Any]:
     """
     Cancel a running scan job.
@@ -309,7 +312,7 @@ async def cancel_job(job_id: str, db: Session = Depends(get_sync_db)) -> dict[st
         raise HTTPException(status_code=500, detail="Failed to cancel job") from None
 
 
-@router.get("/results/{job_id}")
+@router.get("/results/{job_id}", dependencies=[Depends(require_api_key)])
 async def get_job_results(job_id: str, db: Session = Depends(get_sync_db)) -> dict[str, Any]:
     """
     Get results of a completed scan job.

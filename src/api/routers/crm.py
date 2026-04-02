@@ -740,7 +740,8 @@ def enrich_contact_title(
 
     # Fetch several recent emails, pick longest body (most likely to have a signature)
     sig_rows = db.execute(
-        text("""
+        text(
+            """
             SELECT sender_name, COALESCE(body, summary) AS sig_text
             FROM emails
             WHERE user_id = :uid
@@ -748,7 +749,8 @@ def enrich_contact_title(
               AND LENGTH(COALESCE(body, summary)) > 100
             ORDER BY date DESC
             LIMIT 5
-            """),
+            """
+        ),
         {"uid": str(uid), "contact_email": contact.email.lower()},
     ).fetchall()
 
@@ -1245,6 +1247,14 @@ def _scrape_linkedin_title(linkedin_url: str, name: str | None) -> str | None:
     if not li_url.startswith("http"):
         li_url = "https://" + li_url
 
+    # Validate URL is actually a LinkedIn domain to prevent SSRF
+    from urllib.parse import urlparse
+
+    parsed = urlparse(li_url)
+    if not parsed.hostname or not parsed.hostname.endswith("linkedin.com"):
+        _logger.warning("Rejected non-LinkedIn URL: %s", li_url)
+        return None
+
     # Step 1: Fetch the LinkedIn page directly — they serve metadata to bots
     try:
         resp = httpx.get(
@@ -1575,7 +1585,8 @@ def get_discovered_contacts(
     signatures: dict[str, tuple[str, str]] = {}
     if sender_emails:
         sig_rows = db.execute(
-            text("""
+            text(
+                """
                 SELECT DISTINCT ON (LOWER(sender_email))
                        sender_email, body
                 FROM emails
@@ -1584,7 +1595,8 @@ def get_discovered_contacts(
                   AND body IS NOT NULL
                   AND body != ''
                 ORDER BY LOWER(sender_email), date DESC
-            """),
+            """
+            ),
             {"uid": str(uid), "emails": sender_emails},
         ).fetchall()
 

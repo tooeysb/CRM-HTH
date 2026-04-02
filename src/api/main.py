@@ -169,12 +169,9 @@ app.include_router(outreach.router, prefix="/crm/api/outreach", tags=["outreach"
 
 @app.get("/crm")
 async def crm_frontend():
-    """Serve CRM frontend with API key injected."""
+    """Serve CRM frontend."""
     html_path = Path("src/static/crm/index.html")
     html = html_path.read_text()
-    # Inject API key before closing </head> so apiFetch can authenticate
-    api_key_script = f'<script>window.CRM_API_KEY="{settings.secret_key}";</script></head>'
-    html = html.replace("</head>", api_key_script)
     return HTMLResponse(content=html)
 
 

@@ -2,6 +2,8 @@
 Authentication routes for Gmail OAuth2 flow.
 """
 
+import hashlib
+import hmac
 import secrets
 import uuid
 from typing import Any
@@ -20,6 +22,25 @@ from src.models import GmailAccount, User
 logger = get_logger(__name__)
 
 router = APIRouter()
+
+
+def _sign_state(payload: str) -> str:
+    """Create HMAC-signed state token: payload.signature."""
+    sig = hmac.new(settings.secret_key.encode(), payload.encode(), hashlib.sha256).hexdigest()
+    return f"{payload}.{sig}"
+
+
+def _verify_state(state: str) -> str:
+    """Verify HMAC signature and return the payload portion, or raise ValueError."""
+    parts = state.rsplit(".", 1)
+    if len(parts) != 2:
+        raise ValueError("Invalid state token format")
+    payload, signature = parts
+    expected = hmac.new(settings.secret_key.encode(), payload.encode(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(signature, expected):
+        raise ValueError("State token CSRF validation failed")
+    return payload
+
 
 # OAuth2 scopes
 GMAIL_SCOPES = [
@@ -115,8 +136,9 @@ async def initiate_oauth(
             redirect_uri=settings.google_redirect_uri,
         )
 
-        # Generate state token with user_id and account_label
-        state_data = f"{user_id}:{account_label}:{secrets.token_urlsafe(32)}"
+        # Generate HMAC-signed state token with user_id, account_label, and CSRF nonce
+        state_payload = f"{user_id}:{account_label}:{secrets.token_urlsafe(32)}"
+        state_data = _sign_state(state_payload)
         auth_url, _ = flow.authorization_url(
             access_type="offline",
             include_granted_scopes="true",
@@ -158,8 +180,11 @@ async def oauth_callback(
     logger.info("Received OAuth callback")
 
     try:
-        # Parse state token
-        state_parts = state.split(":")
+        # Verify HMAC signature on state token to prevent CSRF
+        state_payload = _verify_state(state)
+
+        # Parse the verified payload
+        state_parts = state_payload.split(":")
         if len(state_parts) < 2:
             raise ValueError("Invalid state token")
 
@@ -195,9 +220,14 @@ async def oauth_callback(
         account_email = None
 
         if hasattr(credentials, "id_token") and credentials.id_token:
-            import jwt
+            from google.auth.transport import requests as google_requests
+            from google.oauth2 import id_token as google_id_token
 
-            id_token_claims = jwt.decode(credentials.id_token, options={"verify_signature": False})
+            id_token_claims = google_id_token.verify_oauth2_token(
+                credentials.id_token,
+                google_requests.Request(),
+                audience=settings.google_client_id,
+            )
             account_email = id_token_claims.get("email")
             logger.info("Extracted email from id_token: %s", account_email)
 
@@ -241,10 +271,30 @@ async def oauth_callback(
             "scopes": credentials.scopes,
         }
 
+        # Encrypt credentials using pgcrypto before storing
+        from sqlalchemy import text
+
+        encrypted_row = db.execute(
+            text(
+                "SELECT encode("
+                "pgp_sym_encrypt(:creds_json::text, :secret_key), 'base64'"
+                ") as encrypted"
+            ),
+            {
+                "creds_json": json.dumps(credentials_dict),
+                "secret_key": settings.secret_key,
+            },
+        ).fetchone()
+
+        if not encrypted_row:
+            raise ValueError("Failed to encrypt credentials")
+
+        encrypted_creds = json.dumps({"encrypted": encrypted_row[0]})
+
         if existing_account:
             # Update existing account
             existing_account.account_email = account_email
-            existing_account.credentials = json.dumps(credentials_dict)
+            existing_account.credentials = encrypted_creds
             existing_account.is_active = True
             existing_account.updated_at = datetime.utcnow()
         else:
@@ -254,7 +304,7 @@ async def oauth_callback(
                 user_id=uuid.UUID(user_id),
                 account_email=account_email,
                 account_label=account_label,
-                credentials=json.dumps(credentials_dict),
+                credentials=encrypted_creds,
                 is_active=True,
                 created_at=datetime.utcnow(),
                 updated_at=datetime.utcnow(),
