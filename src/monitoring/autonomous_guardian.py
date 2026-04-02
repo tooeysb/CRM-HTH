@@ -119,7 +119,7 @@ class ScanGuardian:
         if job.updated_at:
             minutes_since_update = (now - job.updated_at).total_seconds() / 60
             if minutes_since_update > (self.stuck_threshold / 60):
-                return True, "Job hasn't updated in %.1f minutes" % minutes_since_update
+                return True, f"Job hasn't updated in {minutes_since_update:.1f} minutes"
 
         return False, "Job is progressing normally"
 
@@ -152,7 +152,7 @@ class ScanGuardian:
 
         except Exception as e:
             logger.warning("Failed to check worker logs: %s", e)
-            return False, "Could not check logs: %s" % e
+            return False, f"Could not check logs: {e}"
 
     def kill_stuck_job(self, job_id: str) -> bool:
         """Kill a stuck scan job."""

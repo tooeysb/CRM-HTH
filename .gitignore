@@ -83,3 +83,6 @@ dump.rdb
 
 # Heroku
 .heroku/
+
+# Claude Code local settings (machine-specific)
+.claude/settings.local.json

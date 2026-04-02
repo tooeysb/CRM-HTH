@@ -214,7 +214,7 @@ def scan_gmail_task(self, user_id: str, account_labels: list[str] | None = None)
         # Get user and accounts
         user = db.query(User).filter(User.id == uuid.UUID(user_id)).first()
         if not user:
-            raise ValueError("User %s not found" % user_id)
+            raise ValueError(f"User {user_id} not found")
 
         accounts = (
             db.query(GmailAccount)
@@ -227,7 +227,7 @@ def scan_gmail_task(self, user_id: str, account_labels: list[str] | None = None)
         )
 
         if not accounts:
-            raise ValueError("No active accounts found for labels: %s" % account_labels)
+            raise ValueError(f"No active accounts found for labels: {account_labels}")
 
         logger.info("[%s] Found %d accounts to scan", correlation_id, len(accounts))
 
