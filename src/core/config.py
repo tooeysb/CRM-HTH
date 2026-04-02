@@ -93,6 +93,9 @@ class Settings(BaseSettings):
     portal_login_url: str = Field(
         default="https://www.hth-corp.com/auth/login", alias="PORTAL_LOGIN_URL"
     )
+    portal_sso_silent_url: str = Field(
+        default="https://www.hth-corp.com/auth/sso-silent", alias="PORTAL_SSO_URL"
+    )
 
     # Optional: Monitoring
     sentry_dsn: str | None = Field(default=None, alias="SENTRY_DSN")

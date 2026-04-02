@@ -102,7 +102,10 @@ async def health_check():
 
 
 @app.get("/auth/sso")
-async def sso_callback(token: str = Query(..., description="SSO JWT from Portal")):
+async def sso_callback(
+    token: str = Query(..., description="SSO JWT from Portal"),
+    return_to: str = Query("", description="URL to redirect to after SSO"),
+):
     """Validate Portal SSO token and set a long-lived session cookie."""
     if not settings.sso_jwt_secret:
         logger.error("SSO_JWT_SECRET not configured")
@@ -130,7 +133,17 @@ async def sso_callback(token: str = Query(..., description="SSO JWT from Portal"
         algorithm="HS256",
     )
 
-    response = RedirectResponse(url="/crm", status_code=302)
+    # Use return_to if provided and it points to this app's domain
+    redirect_url = "/crm"
+    if return_to:
+        from urllib.parse import urlparse
+
+        parsed = urlparse(return_to)
+        app_domain = urlparse(settings.app_url).hostname if settings.app_url else None
+        if not parsed.hostname or parsed.hostname == app_domain:
+            redirect_url = return_to
+
+    response = RedirectResponse(url=redirect_url, status_code=302)
     response.set_cookie(
         key="crm_session",
         value=session_token,

@@ -58,7 +58,7 @@ class SSOMiddleware(BaseHTTPMiddleware):
             except jwt.InvalidTokenError:
                 logger.warning("Invalid SSO cookie, redirecting to login")
 
-        # No valid session — redirect to Portal login
+        # No valid session — redirect to Portal for silent SSO
         current_url = str(request.url)
-        login_url = f"{settings.portal_login_url}?next={quote(current_url)}"
-        return RedirectResponse(url=login_url, status_code=302)
+        sso_url = f"{settings.portal_sso_silent_url}?return_to={quote(current_url)}"
+        return RedirectResponse(url=sso_url, status_code=302)
