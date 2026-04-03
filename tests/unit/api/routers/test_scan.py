@@ -10,7 +10,6 @@ Covers:
 """
 
 import uuid
-from datetime import datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -28,8 +27,8 @@ def _make_mock_db(user=None, existing_job=None, accounts=None):
 
     db = MagicMock(spec=Session)
 
-    call_count = {"query": 0}
-    query_results = {}
+    _call_count = {"query": 0}
+    _query_results = {}
 
     query_mock = MagicMock()
     query_mock.filter.return_value = query_mock

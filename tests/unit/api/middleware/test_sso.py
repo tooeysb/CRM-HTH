@@ -11,7 +11,6 @@ Covers:
 """
 
 from datetime import UTC, datetime, timedelta
-from unittest.mock import patch
 
 import jwt
 import pytest

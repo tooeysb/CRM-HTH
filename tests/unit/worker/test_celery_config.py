@@ -8,8 +8,6 @@ Covers:
   - Redis SSL config for Heroku
 """
 
-from unittest.mock import patch
-
 from src.worker.celery_app import celery_app
 
 

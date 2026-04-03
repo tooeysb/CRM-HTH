@@ -15,7 +15,6 @@ from fastapi.testclient import TestClient
 from src.api.main import app
 from src.core.config import settings
 from src.core.database import get_sync_db
-from src.models.user import User
 
 
 def _make_mock_db():

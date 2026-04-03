@@ -6,7 +6,7 @@ Covers:
   - Context variable is reset after request
 """
 
-from src.api.middleware.correlation import CorrelationIdMiddleware, request_id_var
+from src.api.middleware.correlation import request_id_var
 
 
 class TestRequestIdVar:

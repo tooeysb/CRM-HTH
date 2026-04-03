@@ -8,8 +8,6 @@ Covers:
   - Default values for optional fields
 """
 
-from unittest.mock import patch
-
 import pytest
 
 from src.core.config import Settings
@@ -58,7 +56,7 @@ class TestVaultPathValidation:
         assert s.obsidian_vault_path == "/tmp/vault"
 
     def test_relative_path_rejected(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError):
             _make_settings(OBSIDIAN_VAULT_PATH="relative/path")
 
 
