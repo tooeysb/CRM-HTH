@@ -81,7 +81,7 @@ async def health_check():
 
     # Redis check
     try:
-        import redis as redis_lib
+        import redis as redis_lib  # type: ignore[import-untyped]
 
         r = redis_lib.from_url(
             settings.redis_url,
