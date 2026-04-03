@@ -112,7 +112,9 @@ async def sso_callback(
         return RedirectResponse(url="/health")
 
     try:
-        payload = jwt.decode(token, settings.sso_jwt_secret, algorithms=["HS256"], options={"verify_aud": False})
+        payload = jwt.decode(
+            token, settings.sso_jwt_secret, algorithms=["HS256"], options={"verify_aud": False}
+        )
     except jwt.ExpiredSignatureError:
         logger.warning("SSO token expired")
         login_url = f"{settings.portal_login_url}?error=token_expired"

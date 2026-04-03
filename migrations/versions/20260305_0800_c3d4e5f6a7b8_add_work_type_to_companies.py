@@ -30,30 +30,37 @@ def upgrade() -> None:
 
     # Migrate data:
     # 'Corporate, Healthcare, Education' -> work_type, company_type becomes 'Owner'
-    op.execute("""
+    op.execute(
+        """
         UPDATE companies
         SET work_type = company_type, company_type = 'Owner'
         WHERE company_type = 'Corporate, Healthcare, Education'
-    """)
+    """
+    )
 
     # 'Real Estate Owner/Developer' -> work_type, company_type becomes 'Owner'
-    op.execute("""
+    op.execute(
+        """
         UPDATE companies
         SET work_type = company_type, company_type = 'Owner'
         WHERE company_type = 'Real Estate Owner/Developer'
-    """)
+    """
+    )
 
     # 'Third Party Service Provider' -> work_type, company_type becomes NULL
-    op.execute("""
+    op.execute(
+        """
         UPDATE companies
         SET work_type = company_type, company_type = NULL
         WHERE company_type = 'Third Party Service Provider'
-    """)
+    """
+    )
 
 
 def downgrade() -> None:
     # Restore original company_type values from work_type
-    op.execute("""
+    op.execute(
+        """
         UPDATE companies
         SET company_type = work_type
         WHERE work_type IN (
@@ -61,5 +68,6 @@ def downgrade() -> None:
             'Real Estate Owner/Developer',
             'Third Party Service Provider'
         )
-    """)
+    """
+    )
     op.drop_column("companies", "work_type")

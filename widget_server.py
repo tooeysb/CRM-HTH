@@ -39,7 +39,9 @@ def _get_backfill_stats():
     global _last_rates, _last_total_rate, _last_total_eta, _last_account_etas
 
     with _engine.connect() as conn:
-        rows = conn.execute(text("""
+        rows = conn.execute(
+            text(
+                """
             SELECT
                 ga.account_email,
                 COUNT(*) FILTER (WHERE e.body IS NOT NULL AND e.body <> '__fetching__') as done,
@@ -50,7 +52,9 @@ def _get_backfill_stats():
             JOIN gmail_accounts ga ON ga.id = e.account_id
             GROUP BY ga.account_email
             ORDER BY ga.account_email
-        """)).fetchall()
+        """
+            )
+        ).fetchall()
 
     now = time.time()
     elapsed = (now - _prev_time) if _prev_time is not None else 0

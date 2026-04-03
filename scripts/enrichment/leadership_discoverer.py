@@ -717,7 +717,8 @@ class LeadershipScraper:
             if not _looks_like_person_name(name_text):
                 continue
 
-            sibling = heading.evaluate("""el => {
+            sibling = heading.evaluate(
+                """el => {
                     let next = el.nextElementSibling;
                     if (next) return next.innerText;
                     let parent = el.parentElement;
@@ -728,7 +729,8 @@ class LeadershipScraper:
                         return texts.join('\\n');
                     }
                     return '';
-                }""")
+                }"""
+            )
 
             if sibling:
                 for line in sibling.split("\n"):

@@ -220,13 +220,15 @@ def backfill_worker(account_id: str):
                     params[f"body_{i}"] = body_text
 
                 db.execute(
-                    text(f"""
+                    text(
+                        f"""
                     UPDATE emails e
                     SET body = v.body, updated_at = NOW()
                     FROM (VALUES {placeholders}) AS v(gmail_message_id, body)
                     WHERE e.gmail_message_id = v.gmail_message_id
                       AND e.account_id = CAST(:account_id AS uuid)
-                """),
+                """
+                    ),
                     params,
                 )
                 updated = len(values_list)

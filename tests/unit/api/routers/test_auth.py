@@ -131,7 +131,5 @@ class TestRevokeAccount:
         user_id = "d4475ca3-0ddc-4ea0-ac89-95ae7fed1e31"
         # Override .first() to return None so the GmailAccount lookup fails with 404
         db.query.return_value.filter.return_value.first.return_value = None
-        response = client.post(
-            f"/auth/revoke/{uuid.uuid4()}?user_id={user_id}"
-        )
+        response = client.post(f"/auth/revoke/{uuid.uuid4()}?user_id={user_id}")
         assert response.status_code == 404

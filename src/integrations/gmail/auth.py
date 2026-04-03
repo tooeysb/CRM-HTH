@@ -413,12 +413,14 @@ class GmailAuthService:
 
         # Encrypt using pgcrypto's pgp_sym_encrypt with secret_key
         # Note: This stores the encrypted data as bytea, but we'll base64 encode for JSON
-        query = text("""
+        query = text(
+            """
             SELECT encode(
                 pgp_sym_encrypt(:creds_json::text, :secret_key),
                 'base64'
             ) as encrypted
-        """)
+        """
+        )
 
         result = await self.db.execute(
             query,
@@ -451,12 +453,14 @@ class GmailAuthService:
         encrypted_data = encrypted_dict["encrypted"]
 
         # Decrypt using pgcrypto's pgp_sym_decrypt
-        query = text("""
+        query = text(
+            """
             SELECT pgp_sym_decrypt(
                 decode(:encrypted_data, 'base64'),
                 :secret_key
             ) as decrypted
-        """)
+        """
+        )
 
         result = await self.db.execute(
             query,
