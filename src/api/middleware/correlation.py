@@ -8,7 +8,7 @@ via a contextvars.ContextVar so that log formatters can include it automatically
 import uuid
 from contextvars import ContextVar
 
-from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
 from starlette.responses import Response
 
@@ -20,7 +20,7 @@ request_id_var: ContextVar[str] = ContextVar("request_id", default="-")
 class CorrelationIdMiddleware(BaseHTTPMiddleware):
     """Inject a correlation ID into every request and expose it in the response."""
 
-    async def dispatch(self, request: Request, call_next) -> Response:
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         # Use client-supplied header if present, otherwise generate one.
         rid = request.headers.get("X-Request-ID") or str(uuid.uuid4())[:8]
         token = request_id_var.set(rid)

@@ -3,6 +3,7 @@ Celery application configuration.
 """
 
 import ssl
+from typing import Any
 
 from celery import Celery
 from celery.schedules import crontab
@@ -84,7 +85,7 @@ celery_app.conf.beat_schedule = {
 
 
 @celery_app.task(bind=True)
-def debug_task(self):
+def debug_task(self: Any) -> dict[str, str]:
     """Debug task to test Celery is working."""
     logger.debug("Request: %r", self.request)
     return {"status": "ok", "message": "Celery is working!"}

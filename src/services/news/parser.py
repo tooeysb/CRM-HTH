@@ -20,16 +20,16 @@ def _try_parse_date(text: str) -> datetime | None:
     if not text or len(text.strip()) < 4:
         return None
     try:
-        from dateutil import parser as dateutil_parser
+        from dateutil import parser as dateutil_parser  # type: ignore[import-untyped]
 
-        return dateutil_parser.parse(text.strip(), fuzzy=True)
+        return dateutil_parser.parse(text.strip(), fuzzy=True)  # type: ignore[no-any-return]
     except (ValueError, OverflowError):
         return None
 
 
 def _extract_text(element: Tag, max_len: int = 300) -> str:
     """Extract cleaned text from an element, truncated to max_len."""
-    text = element.get_text(separator=" ", strip=True)
+    text: str = element.get_text(separator=" ", strip=True)
     if len(text) > max_len:
         text = text[:max_len].rsplit(" ", 1)[0] + "..."
     return text

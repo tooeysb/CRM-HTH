@@ -112,6 +112,7 @@ def get_logger(name: str) -> logging.Logger:
     # Only configure if no handlers exist
     if not logger.handlers:
         handler = logging.StreamHandler()
+        formatter: logging.Formatter
         if _is_production():
             formatter = JsonFormatter(datefmt="%Y-%m-%dT%H:%M:%S")
         else:

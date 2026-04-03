@@ -6,6 +6,7 @@ Parses multi-tab spreadsheets with per-tab column normalization.
 import re
 from datetime import date, datetime
 from pathlib import Path
+from typing import Any
 
 from openpyxl import load_workbook
 
@@ -130,7 +131,7 @@ def _extract_hyperlink_text(value: str) -> str:
     return value
 
 
-def _clean_cell_value(value) -> str | None:
+def _clean_cell_value(value: Any) -> str | None:
     """Normalize a cell value to a clean string, or None if empty."""
     if value is None:
         return None
@@ -235,7 +236,7 @@ class ExcelImporter:
 
     def _parse_tab(
         self,
-        ws,
+        ws: Any,
         tab_name: str,
         column_config: dict[str, list[str]],
     ) -> list[dict]:
